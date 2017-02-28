@@ -1,0 +1,27 @@
+{
+  "name": "code-network-table-client",
+  "version": "1.0.0",
+  "description": "Client for FRC Network Tables",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rakusan2/FRC-NT-Client.git"
+  },
+  "keywords": [
+    "FIRST",
+    "NetworkTables"
+  ],
+  "author": "FRC",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rakusan2/FRC-NT-Client/issues"
+  },
+  "homepage": "https://github.com/rakusan2/FRC-NT-Client#readme",
+  "dependencies": {
+    "@types/node": "^7.0.5",
+    "ieee754": "^1.1.8"
+  }
+}
