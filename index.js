@@ -35,13 +35,126 @@ class Client {
     }
     write(buf) {
         if (this.aliveTimer)
-            setTimeout(this.aliveTimer, 1000);
-        else
-            this.aliveTimer = setTimeout(() => { this.write(this.keepAlive); }, 1000);
+            clearTimeout(this.aliveTimer);
+        this.aliveTimer = setTimeout(() => { this.write(this.keepAlive); }, 1000);
+        this.aliveTimer.unref();
         this.client.write(buf);
     }
 }
 exports.Client = Client;
+var TypeBuf = {
+    byte: {
+        getlen: () => 1, func: (val) => {
+            return {
+                len: () => 1,
+                func: (buf, off) => {
+                    buf[off] = val;
+                }
+            };
+        }
+    },
+    Bool: {
+        getlen: () => 1, func: (val) => {
+            return {
+                len: () => 1,
+                func: (buf, off) => {
+                    buf[off] = val ? 1 : 0;
+                }
+            };
+        }
+    },
+    Double: {
+        getlen: () => 8, func: (val) => {
+            return {
+                len: () => 8,
+                func: (buf, off) => {
+                    ieee754.write(buf, val, off, false, 52, 8);
+                }
+            };
+        }
+    },
+    String: {
+        getlen: () => 0, func: (val) => {
+            let bufT = Buffer.concat([val.length.to128(), Buffer.from(val, 'utf8')]);
+            return {
+                len: () => bufT.length,
+                func: (buf, off) => {
+                    bufT.copy(buf, off);
+                }
+            };
+        }
+    },
+    RawData: {
+        getlen: () => 0, func: (val) => {
+            let len = val.length.to128();
+            return {
+                len: () => val.length + len.length,
+                func: (buf, off) => {
+                    len.copy(buf, off);
+                    val.copy(buf, off + len.length);
+                }
+            };
+        }
+    },
+    BoolArray: {
+        getlen: () => 0, func: (val) => {
+            return {
+                len: () => val.length + 1,
+                func: (buf, off) => {
+                    buf[off] = val.length;
+                    for (let i = 0; i < val.length; i++) {
+                        buf[off + i] = val[i] ? 1 : 0;
+                    }
+                }
+            };
+        }
+    },
+    DoubleArray: {
+        getlen: () => 0, func: (val) => {
+            let len = val.length;
+            return {
+                len: () => 8 * val.length + 1,
+                func: (buf, off) => {
+                    for (let i = 0; i < val.length; i++) {
+                        buf[off] = val.length;
+                        off++;
+                        ieee754.write(buf, val[i], off + 8 * i, false, 52, 8);
+                    }
+                }
+            };
+        }
+    },
+    StringArray: {
+        getlen: () => 0, func: (val) => {
+            let lens = [], len = 1;
+            for (let i = 0; i < val.length; i++) {
+                lens[i] = Buffer.concat([val[i].length.to128(), Buffer.from(val[i])]);
+                len += lens[i].length;
+            }
+            return {
+                len: () => len,
+                func: (buf, off) => {
+                    buf[off] = val.length;
+                    off++;
+                    for (let i = 0; i < val.length; i++) {
+                        lens[i].copy(buf, off);
+                        off += lens[i].length;
+                    }
+                }
+            };
+        }
+    }
+};
+build(['Bool', 'BoolArray', 'Double']);
+function build(s) {
+    let byteCount = 0;
+    for (let i = 0; i < s.length; i++) {
+        TypeBuf[s[i]];
+    }
+    return (a) => {
+        return Buffer.alloc(0);
+    };
+}
 String.prototype.toLEBufA = function () {
     let n = this.length;
     let r = [];
@@ -67,6 +180,16 @@ Number.prototype.to754 = function () {
     let b = Buffer.alloc(8);
     ieee754.write(b, this, 0, false, 52, 8);
     return [...b];
+};
+Number.prototype.to128 = function () {
+    let n = this;
+    let r = [];
+    while (n > 0x07f) {
+        r.push((n & 0x7f) | 0x80);
+        n = n >> 7;
+    }
+    r.push(n);
+    return Buffer.from(r);
 };
 Number.from754 = (buf, offset) => {
     return ieee754.read(buf, offset, false, 52, 8);

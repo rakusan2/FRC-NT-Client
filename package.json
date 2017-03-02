@@ -21,7 +21,9 @@
   },
   "homepage": "https://github.com/rakusan2/FRC-NT-Client#readme",
   "dependencies": {
-    "@types/node": "^7.0.5",
     "ieee754": "^1.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^7.0.5"
   }
 }
