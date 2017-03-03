@@ -1,7 +1,10 @@
 import * as ieee754 from 'ieee754'
 import * as net from 'net'
 export class Client {
+    serverName: String
     client: net.Socket
+    entries: { [key: number]: Entry } = {}
+    keymap: { [key: string]: number } = {}
     constructor(address = '127.0.0.1', port = 1735) {
         this.client = net.connect(port, address, () => {
             this.write(Buffer.from([0x01, 3, 0, ..."nodeClient".toLEBufA()]))
@@ -31,6 +34,124 @@ export class Client {
             })
         })
     }
+    readonly recProto: { [key: number]: (buf: Buffer, offset: number) => number } = {
+        0x02: (buf, off) => {
+            console.log(`supported: ${buf[off++]}.${buf[off++]}`)
+            return off
+        },
+        0x03: (buf, off) => {
+            console.log('Server Hello')
+            return off
+        },
+        0x04: (buf, off) => {
+            console.log('Server Hello')
+            let flags = buf[off++]
+            let s = TypesFrom[e.String](buf, off)
+            off = s.offset
+            this.serverName = s.val
+            return off
+        },
+        0x10: (buf, off) => {
+            let s = TypesFrom[e.String](buf, off)
+            off = s.offset
+            let type = buf[off++],
+                id = (buf[off++] << 8) + buf[off++]
+            let entry: Entry = {
+                type: type,
+                name: s.val,
+                sn: (buf[off++] << 8) + buf[off++],
+                flags: buf[off++]
+            }
+            let val = TypesFrom[entry.type](buf, off)
+            entry.val = val.val
+            this.entries[id] = entry
+            this.keymap[val.val] = id
+            return val.offset
+        },
+        0x11: (buf, off) => {
+            let id = (buf[off++] << 8) + buf[off++],
+                sn = (buf[off++] << 8) + buf[off++],
+                type = buf[off++],
+                val = TypesFrom[type](buf, off)
+            if (id in this.entries && type === this.entries[id].type) {
+                this.entries[id].sn = sn
+                this.entries[id].val = val.val
+            }
+            return val.offset
+        },
+        0x12: (buf, off) => {
+            let id = (buf[off++] << 8) + buf[off++],
+                flags = buf[off++]
+            if (id in this.entries) {
+                this.entries[id].flags = flags
+            }
+            return off
+        },
+        0x13: (buf, off) => {
+            let id = (buf[off++] << 8) + buf[off++],
+                name = this.entries[id].name
+            delete this.entries[id]
+            delete this.keymap[name]
+            return off
+        },
+        0x14: (buf, off) => {
+            let val = 0
+            for (let i = 0; i < 4; i++) {
+                val = (val << 8) + buf[off + i]
+            }
+            if (val === 0xD06CB27A) {
+                this.entries = {}
+                this.keymap = {}
+            }
+            return off + 4
+        },
+        0x21: (buf, off) => {
+            let id = (buf[off++] << 8) + buf[off++],
+                executeID = (buf[off++] << 8) + buf[off++],
+                len = fromLEBuf(buf, off),
+                par = (<RPCD>this.entries[id].val).par,
+                res: { type: number, name: string }[],
+                results = {},
+                s: { val: any, offset: number }
+            for (let i = 0; i < par.length; i++) {
+                let parRes = {}
+                res = par[i].result
+                for (let i = 0; i < res.length; i++) {
+                    s = TypesFrom[res[i].type](buf, off)
+                    off = s.offset
+                    parRes[res[i].name] = s.val
+                }
+                results[par[i].name] = parRes
+            }
+            return off
+        }
+    }
+    readonly sendProto = {
+        0: () => {
+            console.log('send Keep Alive')
+        },
+        0x05: () => {
+            console.log('sending Hello Complete')
+        },
+        0x10: () => {
+            console.log('sending Entry Assignment')
+        },
+        0x11: () => {
+            console.log('sending Entry update')
+        },
+        0x12: () => {
+            console.log('sending Update Flag')
+        },
+        0x13: () => {
+            console.log('sending Entry Delete')
+        },
+        0x14: () => {
+            console.log('sending Delete All')//0xD06CB27A
+        },
+        0x20: () => {
+            console.log('Sending RPC Execute')
+        }
+    }
     private keys: string[]
     readonly keepAlive = Buffer.from([0])
     private aliveTimer: NodeJS.Timer
@@ -40,6 +161,13 @@ export class Client {
         this.aliveTimer.unref()
         this.client.write(buf)
     }
+}
+interface Entry {
+    type: number,
+    name: string,
+    sn: number,
+    flags: number,
+    val?: any
 }
 const enum e {
     Boolean = 0,
@@ -53,6 +181,7 @@ const enum e {
 }
 interface RPCD {
     name: string,
+    resLen: number,
     par: RPCDPar[]
 }
 interface RPCDPar {
@@ -76,11 +205,11 @@ interface d {
     RPCD: RPCD
 }
 type bufFrom<T> = (buf: Buffer, offset: number) => {
-        offset: number,
-        val: T
-    }
+    offset: number,
+    val: T
+}
 interface f<T> {
-    getlen: () => Number
+    getlen?: () => Number
     toBuf?: (val: T) => {
         len: () => any,
         func: (buf: Buffer, off: number) => any
@@ -90,7 +219,7 @@ interface f<T> {
         val: T
     }
 }
-var TypeBuf = {
+const TypeBuf = {
     byte: <f<number>>{
         getlen: () => 1,
         toBuf: (val) => {
@@ -170,7 +299,7 @@ var TypeBuf = {
             }
         },
         fromBuf: (buf, off) => {
-            let {val, offset} = numFrom128(buf, off),
+            let { val, offset } = numFrom128(buf, off),
                 nbuf = Buffer.allocUnsafe(val)
             buf.copy(nbuf, 0, offset)
             return {
@@ -270,7 +399,7 @@ var TypeBuf = {
             }
         }
     },
-    RPCD: <f<d['RPCD']>>{
+    RPCD: <f<RPCD>>{
         fromBuf: (buf, off) => {
             let len = buf[off], st: { val: string, offset: number }
             off++
@@ -282,7 +411,8 @@ var TypeBuf = {
                 parNum = buf[off],
                 par: RPCDPar[] = [],
                 s = { offset: 0, val: "" },
-                resNum=0
+                resNum = 0,
+                resLen = 0
             off++
             for (let i = 0; i < parNum; i++) {
                 let lastPar: RPCDPar = { type: 0, name: "", default: 0, result: [] }
@@ -294,6 +424,7 @@ var TypeBuf = {
                 lastPar.default = t.val
                 off = t.offset
                 resNum = buf[off]
+                resLen += resNum
                 off++
                 for (let i = 0; i < resNum; i++) {
                     let res = { type: 0, name: "" }
@@ -309,34 +440,37 @@ var TypeBuf = {
                 offset: off,
                 val: {
                     name,
+                    resLen,
                     par
                 }
             }
         }
     }
 }
-interface typesFrom{
-    [key:number]:bufFrom<any>
-    0:bufFrom<Boolean>
-    1:bufFrom<number>
-    2:bufFrom<String>
-    3:bufFrom<Buffer>
-    0x10:bufFrom<Boolean[]>
-    0x11:bufFrom<number[]>
-    0x12:bufFrom<string[]>
-    0x20:bufFrom<RPCD>
+interface typesFrom {
+    [key: number]: bufFrom<any>
+    4: bufFrom<number>
+    0: bufFrom<Boolean>
+    1: bufFrom<number>
+    2: bufFrom<string>
+    3: bufFrom<Buffer>
+    0x10: bufFrom<Boolean[]>
+    0x11: bufFrom<number[]>
+    0x12: bufFrom<string[]>
+    0x20: bufFrom<RPCD>
 
 }
-var TypesFrom:typesFrom = {
-        0: TypeBuf.Bool.fromBuf,
-        1: TypeBuf.Double.fromBuf,
-        2: TypeBuf.String.fromBuf,
-        3: TypeBuf.RawData.fromBuf,
-        0x10: TypeBuf.BoolArray.fromBuf,
-        0x11: TypeBuf.DoubleArray.fromBuf,
-        0x12: TypeBuf.StringArray.fromBuf,
-        0x20: TypeBuf.RPCD.fromBuf
-    }
+var TypesFrom: typesFrom = {
+    4: TypeBuf.byte.fromBuf,
+    0: TypeBuf.Bool.fromBuf,
+    1: TypeBuf.Double.fromBuf,
+    2: TypeBuf.String.fromBuf,
+    3: TypeBuf.RawData.fromBuf,
+    0x10: TypeBuf.BoolArray.fromBuf,
+    0x11: TypeBuf.DoubleArray.fromBuf,
+    0x12: TypeBuf.StringArray.fromBuf,
+    0x20: TypeBuf.RPCD.fromBuf
+}
 //type a = keyof typesFrom
 //function build<T1 extends a>(s: [T1]): (a: [typesFrom[T1]]) => Buffer
 //function build<T1 extends a, T2 extends a>(s: [T1, T2]): (a: [typesFrom[T1], typesFrom[T2]]) => Buffer
@@ -344,7 +478,7 @@ var TypesFrom:typesFrom = {
 //function build<T1 extends a, T2 extends a, T3 extends a, T4 extends a>(s: [T1, T2, T3, T4]): (a: [typesFrom[T1], typesFrom[T2], typesFrom[T3], typesFrom[T4]]) => Buffer
 //function build<T1 extends a, T2 extends a, T3 extends a, T4 extends a, T5 extends a>(s: [T1, T2, T3, T4, T5]): (a: [typesFrom[T1], typesFrom[T2], typesFrom[T3], typesFrom[T4], typesFrom[T5]]) => Buffer
 //function build<T1 extends a, T2 extends a, T3 extends a, T4 extends a, T5 extends a, T6 extends a>(s: [T1, T2, T3, T4, T5, T6]): (a: [typesFrom[T1], typesFrom[T2], typesFrom[T3], typesFrom[T4], typesFrom[T5], typesFrom[T6]]) => Buffer
-function build(s: number[]): (a: any[]) => Buffer{
+function build(s: number[]): (a: any[]) => Buffer {
     let byteCount = 0
     for (let i = 0; i < s.length; i++) {
         TypeBuf[s[i]]
