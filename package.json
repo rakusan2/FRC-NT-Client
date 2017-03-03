@@ -4,7 +4,7 @@
   "description": "Client for FRC Network Tables",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test/test.js"
   },
   "repository": {
     "type": "git",
@@ -12,9 +12,10 @@
   },
   "keywords": [
     "FIRST",
+    "FRC",
     "NetworkTables"
   ],
-  "author": "FRC",
+  "author": "Tomas Rakusan",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/rakusan2/FRC-NT-Client/issues"

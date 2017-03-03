@@ -9,13 +9,13 @@ class Client {
         this.entries = {};
         this.keymap = {};
         this.reconnect = false;
-        this.gListeners = [];
-        this.keyListener = [];
+        this.listeners = [];
+        this.RPCExecCallback = {};
         this.recProto = {
             /** Protocol Version Unsupported */
             0x02: (buf, off) => {
                 var ver = `${buf[off++]}.${buf[off++]}`;
-                console.log(`supported: ${buf[off++]}.${buf[off++]}`);
+                console.log(`supported: ${ver}`);
                 if (ver === '2.0')
                     this.reconnect = true;
                 return off;
@@ -24,6 +24,7 @@ class Client {
             0x03: (buf, off) => {
                 console.log('Server Hello');
                 this.connected = true;
+                this.toServer.HelloComplete();
                 return off;
             },
             /** Server Hello */
@@ -31,16 +32,14 @@ class Client {
                 console.log('Server Hello');
                 let flags = buf[off++];
                 let s = TypesFrom[2 /* String */](buf, off);
-                off = s.offset;
                 this.serverName = s.val;
-                return off;
+                return s.offset;
             },
             /** Entry Assignment */
             0x10: (buf, off) => {
                 let s = TypesFrom[2 /* String */](buf, off);
                 off = s.offset;
-                let type = buf[off++], id = (buf[off++] << 8) + buf[off++];
-                let entry = {
+                let type = buf[off++], id = (buf[off++] << 8) + buf[off++], typeName = typeNames[type], entry = {
                     type: type,
                     name: s.val,
                     sn: (buf[off++] << 8) + buf[off++],
@@ -50,14 +49,20 @@ class Client {
                 entry.val = val.val;
                 this.entries[id] = entry;
                 this.keymap[val.val] = id;
+                for (let i = 0; i < this.listeners.length; i++) {
+                    this.listeners[i](name, val.val, typeName, "add", id);
+                }
                 return val.offset;
             },
             /** Entry Update */
             0x11: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = buf[off++], val = TypesFrom[type](buf, off);
+                let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = buf[off++], val = TypesFrom[type](buf, off), typeName = typeNames[type];
                 if (id in this.entries && type === this.entries[id].type) {
                     this.entries[id].sn = sn;
                     this.entries[id].val = val.val;
+                }
+                for (let i = 0; i < this.listeners.length; i++) {
+                    this.listeners[i](name, val.val, typeName, "update", id);
                 }
                 return val.offset;
             },
@@ -71,9 +76,12 @@ class Client {
             },
             /** Entry Delete */
             0x13: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], name = this.entries[id].name;
+                let id = (buf[off++] << 8) + buf[off++], name = this.entries[id].name, typename = typeNames[this.entries[id].type];
                 delete this.entries[id];
                 delete this.keymap[name];
+                for (let i = 0; i < this.listeners.length; i++) {
+                    this.listeners[i](name, null, typename, "delete", id);
+                }
                 return off;
             },
             /** Clear All Entries */
@@ -101,6 +109,10 @@ class Client {
                     }
                     results[par[i].name] = parRes;
                 }
+                if (executeID in this.RPCExecCallback) {
+                    this.RPCExecCallback[executeID](results);
+                    delete this.RPCExecCallback[executeID];
+                }
                 return off;
             }
         };
@@ -117,81 +129,12 @@ class Client {
             HelloComplete: () => {
                 console.log('sending Hello Complete');
                 this.write(toServer.helloComplete);
-            },
-            Assign: (type, val, name, flags) => {
-                console.log('sending Entry Assignment');
-                let n = TypeBuf[2 /* String */].toBuf(name);
-                let f = TypeBuf[type].toBuf(val), nlen = n.length, len = f.length + nlen + 7, buf = Buffer.allocUnsafe(len);
-                buf[0] = 0x10;
-                n.write(buf, 1);
-                buf[nlen + 1] = type;
-                buf[nlen + 2] = 0xff;
-                buf[nlen + 3] = 0xff;
-                buf[nlen + 4] = 0;
-                buf[nlen + 5] = 0;
-                buf[nlen + 6] = flags;
-                f.write(buf, nlen + 7);
-                this.write(buf);
-            },
-            Update: (id) => {
-                console.log('sending Entry update');
-                let entry = this.entries[id];
-                let f = TypeBuf[entry.type].toBuf(entry.val), len = f.length + 6, buf = Buffer.allocUnsafe(len);
-                entry.sn++;
-                buf[0] = 0x11;
-                buf[1] = id >> 8;
-                buf[2] = id & 0xff;
-                buf[3] = entry.sn >> 8;
-                buf[4] = entry.sn & 0xff;
-                buf[5] = entry.type;
-                f.write(buf, 6);
-                this.write(buf);
-            },
-            Flag: (id, flags) => {
-                console.log('sending Update Flag');
-                this.write(Buffer.from([0x12, id >> 8, id & 0xff, flags]));
-            },
-            Delete: (id) => {
-                console.log('sending Entry Delete');
-                this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
-            },
-            DeleteAll: () => {
-                console.log('sending Delete All');
-                this.write(toServer.deleteAll);
-            },
-            RPCExec: (id, val) => {
-                console.log('Sending RPC Execute');
-                if (id in this.entries) {
-                    let entry = this.entries[id];
-                    if (entry.type !== 32 /* RPC */)
-                        return;
-                    let par = entry.val.par, f = [], value, len = 0;
-                    for (let i = 0; i < par.length; i++) {
-                        value = val[par[i].name];
-                        if (!checkType(value, par[i].type))
-                            return;
-                        let n = TypeBuf[par[i].type].toBuf(value);
-                        len += n.length;
-                        f.push(n);
-                    }
-                    let encLen = len.to128(), buf = Buffer.allocUnsafe(len + encLen.length + 5), off = 5 + encLen.length, randId = Math.floor(Math.random() * 0xffff);
-                    buf[0] = 0x21;
-                    buf[1] = id >> 8;
-                    buf[2] = id & 0xff;
-                    buf[3] = randId >> 8;
-                    buf[4] = randId & 0xff;
-                    encLen.copy(buf, 5);
-                    for (let i = 0; i < f.length; i++) {
-                        f[i].write(buf, off);
-                        off += f[i].length;
-                    }
-                    this.write(buf);
-                }
             }
         };
         this.keepAlive = Buffer.from([0]);
     }
     start(address = '127.0.0.1', port = 1735) {
+        this.connected = false;
         this.address = address;
         this.port = port;
         this.client = net.connect(port, address, () => {
@@ -204,17 +147,110 @@ class Client {
             }
         });
     }
-    onGlobal(callback) {
-        this.gListeners.push(callback);
+    addListener(callback) {
+        this.listeners.push(callback);
     }
-    onKey(callback) {
+    getKeyID(key) {
+        return this.keymap[key];
+    }
+    getEntry(id) {
+        return this.entries[id];
+    }
+    getKeys() {
+        return this.keymap;
+    }
+    getEntries() {
+        return this.entries;
     }
     read(buf, off) {
+        console.log('reading');
         if (buf[off] in this.recProto) {
-            off = this.recProto[buf[off]](buf, 1);
+            console.log('processing ' + buf[off]);
+            off = this.recProto[buf[off]](buf, off + 1);
             if (buf.length > off)
                 this.read(buf, off);
         }
+    }
+    Assign(type, val, name, persist = false) {
+        console.log('sending Entry Assignment');
+        let n = TypeBuf[2 /* String */].toBuf(name);
+        let f = TypeBuf[type].toBuf(val), nlen = n.length, len = f.length + nlen + 7, buf = Buffer.allocUnsafe(len);
+        buf[0] = 0x10;
+        n.write(buf, 1);
+        buf[nlen + 1] = type;
+        buf[nlen + 2] = 0xff;
+        buf[nlen + 3] = 0xff;
+        buf[nlen + 4] = 0;
+        buf[nlen + 5] = 0;
+        buf[nlen + 6] = persist ? 1 : 0;
+        f.write(buf, nlen + 7);
+        this.write(buf);
+    }
+    Update(id, val) {
+        if (!(id in this.entries))
+            return;
+        let entry = this.entries[id];
+        if (!checkType(val, entry.type))
+            return;
+        console.log('sending Entry update');
+        entry.val = val;
+        let f = TypeBuf[entry.type].toBuf(val), len = f.length + 6, buf = Buffer.allocUnsafe(len);
+        entry.sn++;
+        buf[0] = 0x11;
+        buf[1] = id >> 8;
+        buf[2] = id & 0xff;
+        buf[3] = entry.sn >> 8;
+        buf[4] = entry.sn & 0xff;
+        buf[5] = entry.type;
+        f.write(buf, 6);
+        this.write(buf);
+    }
+    Flag(id, persist = false) {
+        if (!(id in this.entries))
+            return new Error('Does not exist');
+        console.log('sending Update Flag');
+        this.write(Buffer.from([0x12, id >> 8, id & 0xff, persist ? 1 : 0]));
+    }
+    Delete(id) {
+        if (!(id in this.entries))
+            return new Error('Does not exist');
+        console.log('sending Entry Delete');
+        this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
+    }
+    DeleteAll() {
+        console.log('sending Delete All');
+        this.write(toServer.deleteAll);
+    }
+    RPCExec(id, val, callback) {
+        if (id in this.entries)
+            return new Error('Does not exist');
+        let entry = this.entries[id];
+        if (entry.type !== 32 /* RPC */)
+            return new Error('Is not an RPC');
+        console.log('Sending RPC Execute');
+        let par = entry.val.par, f = [], value, len = 0, parName = "";
+        for (let i = 0; i < par.length; i++) {
+            parName = par[i].name;
+            value = parName in val ? val[par[i].name] : par[i].default;
+            if (!checkType(value, par[i].type))
+                return new Error(`Wrong Type: ${value} is not a ${typeNames[par[i].type]}`);
+            let n = TypeBuf[par[i].type].toBuf(value);
+            len += n.length;
+            f.push(n);
+        }
+        let encLen = len.to128(), buf = Buffer.allocUnsafe(len + encLen.length + 5), off = 5 + encLen.length, randId = Math.floor(Math.random() * 0xffff);
+        buf[0] = 0x21;
+        buf[1] = id >> 8;
+        buf[2] = id & 0xff;
+        buf[3] = randId >> 8;
+        buf[4] = randId & 0xff;
+        encLen.copy(buf, 5);
+        for (let i = 0; i < f.length; i++) {
+            f[i].write(buf, off);
+            off += f[i].length;
+        }
+        this.write(buf);
+        this.RPCExecCallback[randId] = callback;
     }
     write(buf) {
         if (this.aliveTimer)
@@ -225,6 +261,16 @@ class Client {
     }
 }
 exports.Client = Client;
+const typeNames = {
+    0x00: "Boolean",
+    0x01: "Number",
+    0x02: "String",
+    0x03: "Buffer",
+    0x10: "BooleanArray",
+    0x11: "NumberArray",
+    0x12: "StringArray",
+    0x20: "RPC"
+};
 function checkType(val, type) {
     if (Array.isArray(val)) {
         if (type === 16 /* BoolArray */ && val.every(e => typeof e === "boolean"))
