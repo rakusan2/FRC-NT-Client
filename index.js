@@ -50,19 +50,20 @@ class Client {
                 this.entries[id] = entry;
                 this.keymap[val.val] = id;
                 for (let i = 0; i < this.listeners.length; i++) {
-                    this.listeners[i](name, val.val, typeName, "add", id);
+                    this.listeners[i](s.val, val.val, typeName, "add", id);
                 }
                 return val.offset;
             },
             /** Entry Update */
             0x11: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = buf[off++], val = TypesFrom[type](buf, off), typeName = typeNames[type];
+                let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = buf[off++], val = TypesFrom[type](buf, off), typeName = typeNames[type], name = "";
                 if (id in this.entries && type === this.entries[id].type) {
                     this.entries[id].sn = sn;
                     this.entries[id].val = val.val;
-                }
-                for (let i = 0; i < this.listeners.length; i++) {
-                    this.listeners[i](name, val.val, typeName, "update", id);
+                    name = this.entries[id].name;
+                    for (let i = 0; i < this.listeners.length; i++) {
+                        this.listeners[i](name, val.val, typeName, "update", id);
+                    }
                 }
                 return val.offset;
             },
@@ -139,7 +140,10 @@ class Client {
         this.port = port;
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName);
-            this.client.on('data', d => this.read(d, 0));
+            this.client.on('data', d => {
+                console.log('Receiving');
+                this.read(d, 0);
+            });
         }).on('close', e => {
             console.log({ client: 'closed', error: e });
             if (this.reconnect) {
@@ -163,7 +167,6 @@ class Client {
         return this.entries;
     }
     read(buf, off) {
-        console.log('reading');
         if (buf[off] in this.recProto) {
             console.log('processing ' + buf[off]);
             off = this.recProto[buf[off]](buf, off + 1);
