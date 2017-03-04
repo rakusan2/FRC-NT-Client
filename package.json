@@ -2,7 +2,8 @@
   "name": "wpilib-nt-client",
   "version": "1.0.0",
   "description": "Client for FRC Network Tables",
-  "main": "index.js",
+  "main" : "index.js",
+  "types" : "index.d.ts",
   "engines":{ "node":">4.0" },
   "scripts": {
     "test": "node test/test.js"
