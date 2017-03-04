@@ -16,20 +16,17 @@ class Client {
             /** Protocol Version Unsupported */
             0x02: (buf, off) => {
                 var ver = `${buf[off++]}.${buf[off++]}`;
-                console.log(`supported: ${ver}`);
                 if (ver === '2.0')
                     this.reconnect = true;
                 return off;
             },
             /** Server Hello Complete */
             0x03: (buf, off) => {
-                console.log('Server Hello Complete');
                 this.toServer.HelloComplete();
                 return off;
             },
             /** Server Hello */
             0x04: (buf, off) => {
-                console.log('Server Hello');
                 let flags = buf[off++];
                 let sName = TypesFrom[2 /* String */](buf, off);
                 this.serverName = sName.val;
@@ -135,7 +132,6 @@ class Client {
         };
         this.toServer = {
             Hello: (serverName) => {
-                console.log('sending client hello');
                 let s = TypeBuf[2 /* String */].toBuf(serverName), buf = Buffer.allocUnsafe(s.length + 3);
                 buf[0] = 0x01;
                 buf[1] = 3;
@@ -144,7 +140,6 @@ class Client {
                 this.write(buf, true);
             },
             HelloComplete: () => {
-                console.log('sending Hello Complete');
                 this.write(toServer.helloComplete, true);
                 this.connected = true;
                 while (this.lateCallbacks.length) {
@@ -174,11 +169,9 @@ class Client {
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName);
             this.client.on('data', data => {
-                console.log('Receiving');
                 this.read(data, 0);
             });
         }).on('close', e => {
-            console.log({ client: 'closed', error: e });
             if (this.reconnect) {
                 this.start(callback, address, port);
             }
@@ -223,7 +216,6 @@ class Client {
     }
     read(buf, off) {
         if (buf[off] in this.recProto) {
-            console.log('processing ' + buf[off]);
             off = this.recProto[buf[off]](buf, off + 1);
             if (buf.length > off)
                 this.read(buf, off);
@@ -237,7 +229,6 @@ class Client {
      * @param persist Whether the Value should persist on the server through a restart
      */
     Assign(type, val, name, persist = false) {
-        console.log('sending Entry Assignment');
         let n = TypeBuf[2 /* String */].toBuf(name);
         let f = TypeBuf[type].toBuf(val), nlen = n.length, len = f.length + nlen + 7, buf = Buffer.allocUnsafe(len);
         buf[0] = 0x10;
@@ -262,7 +253,6 @@ class Client {
         let entry = this.entries[id];
         if (!checkType(val, entry.typeID))
             return new Error('Wrong Type');
-        console.log('sending Entry update');
         entry.val = val;
         let f = TypeBuf[entry.typeID].toBuf(val), len = f.length + 6, buf = Buffer.allocUnsafe(len);
         entry.sn++;
@@ -283,7 +273,6 @@ class Client {
     Flag(id, persist = false) {
         if (!(id in this.entries))
             return new Error('Does not exist');
-        console.log('sending Update Flag');
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, persist ? 1 : 0]));
     }
     /**
@@ -293,14 +282,12 @@ class Client {
     Delete(id) {
         if (!(id in this.entries))
             return new Error('Does not exist');
-        console.log('sending Entry Delete');
         this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
     }
     /**
      * Deletes All Entries
      */
     DeleteAll() {
-        console.log('sending Delete All');
         this.write(toServer.deleteAll);
         this.entries = {};
         this.keymap = {};
@@ -317,7 +304,6 @@ class Client {
         let entry = this.entries[id];
         if (entry.typeID !== 32 /* RPC */)
             return new Error('Is not an RPC');
-        console.log('Sending RPC Execute');
         let par = entry.val.par, f = [], value, len = 0, parName = "";
         for (let i = 0; i < par.length; i++) {
             parName = par[i].name;

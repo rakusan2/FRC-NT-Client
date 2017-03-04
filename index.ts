@@ -33,11 +33,9 @@ export class Client {
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName)
             this.client.on('data', data => {
-                console.log('Receiving')
                 this.read(data, 0)
             })
         }).on('close', e => {
-            console.log({ client: 'closed', error: e })
             if (this.reconnect) {
                 this.start(callback, address, port)
             }
@@ -81,7 +79,6 @@ export class Client {
     }
     private read(buf: Buffer, off: number) {
         if (buf[off] in this.recProto) {
-            console.log('processing ' + buf[off])
             off = this.recProto[buf[off]](buf, off + 1)
             if (buf.length > off) this.read(buf, off)
         }
@@ -90,19 +87,16 @@ export class Client {
         /** Protocol Version Unsupported */
         0x02: (buf, off) => {
             var ver = `${buf[off++]}.${buf[off++]}`
-            console.log(`supported: ${ver}`)
             if (ver === '2.0') this.reconnect = true
             return off
         },
         /** Server Hello Complete */
         0x03: (buf, off) => {
-            console.log('Server Hello Complete')
             this.toServer.HelloComplete()
             return off
         },
         /** Server Hello */
         0x04: (buf, off) => {
-            console.log('Server Hello')
             let flags = buf[off++]
             let sName = TypesFrom[e.String](buf, off)
             this.serverName = sName.val
@@ -225,7 +219,6 @@ export class Client {
     }
     private readonly toServer = {
         Hello: (serverName: string) => {
-            console.log('sending client hello')
             let s = TypeBuf[e.String].toBuf(serverName),
                 buf = Buffer.allocUnsafe(s.length + 3)
             buf[0] = 0x01
@@ -235,7 +228,6 @@ export class Client {
             this.write(buf, true)
         },
         HelloComplete: () => {
-            console.log('sending Hello Complete')
             this.write(toServer.helloComplete, true)
             this.connected = true
             while (this.lateCallbacks.length) {
@@ -251,7 +243,6 @@ export class Client {
      * @param persist Whether the Value should persist on the server through a restart
      */
     Assign(type: number, val: any, name: string, persist = false) {
-        console.log('sending Entry Assignment')
         let n = TypeBuf[e.String].toBuf(name)
         let f = TypeBuf[type].toBuf(val),
             nlen = n.length,
@@ -277,7 +268,6 @@ export class Client {
         if (!(id in this.entries)) return new Error('ID not found')
         let entry = this.entries[id]
         if (!checkType(val, entry.typeID)) return new Error('Wrong Type')
-        console.log('sending Entry update')
         entry.val = val
         let f = TypeBuf[entry.typeID].toBuf(val),
             len = f.length + 6,
@@ -299,7 +289,6 @@ export class Client {
      */
     Flag(id: number, persist = false) {
         if (!(id in this.entries)) return new Error('Does not exist')
-        console.log('sending Update Flag')
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, persist ? 1 : 0]))
     }
     /**
@@ -308,14 +297,12 @@ export class Client {
      */
     Delete(id: number) {
         if (!(id in this.entries)) return new Error('Does not exist')
-        console.log('sending Entry Delete')
         this.write(Buffer.from([0x13, id >> 8, id & 0xff]))
     }
     /**
      * Deletes All Entries
      */
     DeleteAll() {
-        console.log('sending Delete All')
         this.write(toServer.deleteAll)
         this.entries = {}
         this.keymap = {}
@@ -330,7 +317,6 @@ export class Client {
         if (id in this.entries) return new Error('Does not exist')
         let entry = this.entries[id]
         if (entry.typeID !== e.RPC) return new Error('Is not an RPC')
-        console.log('Sending RPC Execute')
         let par = (<RPC>entry.val).par,
             f: toBufRes[] = [],
             value: any,
