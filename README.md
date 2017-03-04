@@ -35,7 +35,7 @@ ntClient.addListener((key, val, type, id) => {
     - **key** - The Key for the value
     - **value** - The value associated with the key
     - **valueType** - The type of the value Possible Types are listed Bellow
-    - **type** - The type of the callback. Possible Types are: "add", "update", "delete"
+    - **type** - The type of the callback. Possible Types are: "add", "update", "delete", "flagChange"
 - `.getKeyID(key)`
     - Returns the ID of a key or All of the keys if key if left out
 - `.getEntry(id)`

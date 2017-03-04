@@ -81,7 +81,16 @@ class Client {
             0x12: (buf, off) => {
                 let id = (buf[off++] << 8) + buf[off++], flags = buf[off++];
                 if (id in this.entries) {
-                    this.entries[id].flags = flags;
+                    let entry = this.entries[id];
+                    entry.flags = flags;
+                    for (let i = 0; i < this.listeners.length; i++) {
+                        if (this.connected) {
+                            this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id);
+                        }
+                        else {
+                            this.lateCallbacks.push(() => this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id));
+                        }
+                    }
                 }
                 return off;
             },

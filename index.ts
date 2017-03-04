@@ -1,6 +1,6 @@
 import * as ieee754 from 'ieee754'
 import * as net from 'net'
-export type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update", id: number) => any
+export type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update" | "flagChange", id: number) => any
 export class Client {
     serverName: String
     clientName = "node" + +new Date()
@@ -162,7 +162,16 @@ export class Client {
             let id = (buf[off++] << 8) + buf[off++],
                 flags = buf[off++]
             if (id in this.entries) {
-                this.entries[id].flags = flags
+                let entry = this.entries[id]
+                entry.flags = flags
+                for (let i = 0; i < this.listeners.length; i++) {
+                    if (this.connected) {
+                        this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id)
+                    }
+                    else {
+                        this.lateCallbacks.push(() => this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id))
+                    }
+                }
             }
             return off
         },
