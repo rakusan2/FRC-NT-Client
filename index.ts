@@ -1,11 +1,11 @@
 import * as ieee754 from 'ieee754'
 import * as net from 'net'
-type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update", id: number) => any
+export type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update", id: number) => any
 export class Client {
     serverName: String
     clientName = "node" + +new Date()
     private client: net.Socket
-    connected = false
+    private connected = false
     private entries: { [key: number]: Entry } = {}
     private keymap: { [key: string]: number } = {}
     private reconnect = false
@@ -13,15 +13,27 @@ export class Client {
     private port: number
     private listeners: Listener[] = []
     private RPCExecCallback: { [key: number]: (result: Object) => any } = {}
+    private lateCallbacks: (() => any)[] = []
+    /**
+     * True if the Client has completed its hello and is connected
+     */
+    isConnected(){
+        return this.isConnected
+    }
+    /**
+     * Start the Client
+     * @param address Address of the Server. Default = "localhost"
+     * @param port Port of the Server. Default = 1735
+     */
     start(address = '127.0.0.1', port = 1735) {
         this.connected = false
         this.address = address
         this.port = port
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName)
-            this.client.on('data', d => {
+            this.client.on('data', data => {
                 console.log('Receiving')
-                this.read(d, 0)
+                this.read(data, 0)
             })
         }).on('close', e => {
             console.log({ client: 'closed', error: e })
@@ -30,18 +42,39 @@ export class Client {
             }
         })
     }
+    /**
+     * Add a Listener to be called on change of an Entry
+     * @param callback Listener
+     */
     addListener(callback: Listener) {
         this.listeners.push(callback)
     }
-    getKeyID(key: string) {
-        return this.keymap[key]
+    /**
+     * Get the unique ID of a key or the IDs of all keys if called empty
+     * @param key name of the key
+     */
+    getKeyID(key?: string) {
+        if (key == undefined) {
+            return this.keymap
+        }
+        else return this.keymap[key]
     }
+    /**
+     * Gets an Entry
+     * @param id ID of an Entry
+     */
     getEntry(id: number) {
         return this.entries[id]
     }
+    /**
+     * Get an Array of Keys
+     */
     getKeys() {
-        return this.keymap
+        return Object.keys(this.keymap)
     }
+    /**
+     * Get All of the Entries
+     */
     getEntries() {
         return this.entries
     }
@@ -63,7 +96,6 @@ export class Client {
         /** Server Hello Complete */
         0x03: (buf, off) => {
             console.log('Server Hello Complete')
-            this.connected = true
             this.toServer.HelloComplete()
             return off
         },
@@ -71,29 +103,34 @@ export class Client {
         0x04: (buf, off) => {
             console.log('Server Hello')
             let flags = buf[off++]
-            let s = TypesFrom[e.String](buf, off)
-            this.serverName = s.val
-            return s.offset
+            let sName = TypesFrom[e.String](buf, off)
+            this.serverName = sName.val
+            return sName.offset
         },
         /** Entry Assignment */
         0x10: (buf, off) => {
-            let s = TypesFrom[e.String](buf, off)
-            off = s.offset
+            let keyName = TypesFrom[e.String](buf, off)
+            off = keyName.offset
             let type = buf[off++],
                 id = (buf[off++] << 8) + buf[off++],
                 typeName = typeNames[type],
                 entry: Entry = {
-                    type: type,
-                    name: s.val,
+                    typeID: type,
+                    name: keyName.val,
                     sn: (buf[off++] << 8) + buf[off++],
                     flags: buf[off++]
                 }
-            let val = TypesFrom[entry.type](buf, off)
+            let val = TypesFrom[entry.typeID](buf, off)
             entry.val = val.val
             this.entries[id] = entry
             this.keymap[val.val] = id
             for (let i = 0; i < this.listeners.length; i++) {
-                this.listeners[i](s.val, val.val, typeName, "add", id)
+                if (this.connected) {
+                    this.listeners[i](keyName.val, val.val, typeName, "add", id)
+                }
+                else {
+                    this.lateCallbacks.push(() => this.listeners[i](keyName.val, val.val, typeName, "add", id))
+                }
             }
             return val.offset
         },
@@ -105,13 +142,19 @@ export class Client {
                 val = TypesFrom[type](buf, off),
                 typeName = typeNames[type],
                 name = ""
-            if (id in this.entries && type === this.entries[id].type) {
-                this.entries[id].sn = sn
-                this.entries[id].val = val.val
-                name = this.entries[id].name
-            for (let i = 0; i < this.listeners.length; i++) {
-                this.listeners[i](name, val.val, typeName, "update", id)
-            }
+            if (id in this.entries && type === this.entries[id].typeID) {
+                let entry = this.entries[id]
+                entry.sn = sn
+                entry.val = val.val
+                name = entry.name
+                for (let i = 0; i < this.listeners.length; i++) {
+                    if (this.connected) {
+                        this.listeners[i](name, val.val, typeName, "update", id)
+                    }
+                    else {
+                        this.lateCallbacks.push(() => this.listeners[i](name, val.val, typeName, "update", id))
+                    }
+                }
             }
             return val.offset
         },
@@ -128,11 +171,16 @@ export class Client {
         0x13: (buf, off) => {
             let id = (buf[off++] << 8) + buf[off++],
                 name = this.entries[id].name,
-                typename = typeNames[this.entries[id].type]
+                typename = typeNames[this.entries[id].typeID]
             delete this.entries[id]
             delete this.keymap[name]
             for (let i = 0; i < this.listeners.length; i++) {
-                this.listeners[i](name, null, typename, "delete", id)
+                if (this.connected) {
+                    this.listeners[i](name, null, typename, "delete", id)
+                }
+                else {
+                    this.lateCallbacks.push(() => this.listeners[i](name, null, typename, "delete", id))
+                }
             }
             return off
         },
@@ -154,14 +202,14 @@ export class Client {
                 executeID = (buf[off++] << 8) + buf[off++],
                 len = fromLEBuf(buf, off),
                 par = (<RPC>this.entries[id].val).par,
-                res: { type: number, name: string }[],
+                res: { typeId: number, name: string }[],
                 results = {},
                 s: { val: any, offset: number }
             for (let i = 0; i < par.length; i++) {
                 let parRes = {}
                 res = par[i].result
                 for (let i = 0; i < res.length; i++) {
-                    s = TypesFrom[res[i].type](buf, off)
+                    s = TypesFrom[res[i].typeId](buf, off)
                     off = s.offset
                     parRes[res[i].name] = s.val
                 }
@@ -183,13 +231,24 @@ export class Client {
             buf[1] = 3
             buf[2] = 0
             s.write(buf, 3)
-            this.write(buf)
+            this.write(buf, true)
         },
         HelloComplete: () => {
             console.log('sending Hello Complete')
-            this.write(toServer.helloComplete)
+            this.write(toServer.helloComplete, true)
+            this.connected = true
+            while(this.lateCallbacks.length){
+                this.lateCallbacks.shift()()
+            }
         }
     }
+    /**
+     * Add an Entry
+     * @param type ID of the type of the Value
+     * @param val The Value
+     * @param name The Key of the Entry
+     * @param persist Whether the Value should persist on the server through a restart
+     */
     Assign(type: number, val: any, name: string, persist = false) {
         console.log('sending Entry Assignment')
         let n = TypeBuf[e.String].toBuf(name)
@@ -208,13 +267,18 @@ export class Client {
         f.write(buf, nlen + 7)
         this.write(buf)
     }
+    /**
+     * Updates an Entry
+     * @param id The ID of the Entry
+     * @param val The value of the Entry
+     */
     Update(id: number, val: any) {
-        if (!(id in this.entries)) return
+        if (!(id in this.entries)) return new Error('ID not found')
         let entry = this.entries[id]
-        if (!checkType(val, entry.type)) return
+        if (!checkType(val, entry.typeID)) return new Error('Wrong Type')
         console.log('sending Entry update')
         entry.val = val
-        let f = TypeBuf[entry.type].toBuf(val),
+        let f = TypeBuf[entry.typeID].toBuf(val),
             len = f.length + 6,
             buf = Buffer.allocUnsafe(len)
         entry.sn++
@@ -223,28 +287,48 @@ export class Client {
         buf[2] = id & 0xff
         buf[3] = entry.sn >> 8
         buf[4] = entry.sn & 0xff
-        buf[5] = entry.type
+        buf[5] = entry.typeID
         f.write(buf, 6)
         this.write(buf)
     }
+    /**
+     * Updates the Flag of an Entry
+     * @param id The ID of the Entry
+     * @param persist Whether the Entry should persist through a restart on the server
+     */
     Flag(id: number, persist = false) {
         if (!(id in this.entries)) return new Error('Does not exist')
         console.log('sending Update Flag')
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, persist ? 1 : 0]))
     }
+    /**
+     * Deletes an Entry
+     * @param id The ID of the Entry
+     */
     Delete(id: number) {
         if (!(id in this.entries)) return new Error('Does not exist')
         console.log('sending Entry Delete')
         this.write(Buffer.from([0x13, id >> 8, id & 0xff]))
     }
+    /**
+     * Deletes All Entries
+     */
     DeleteAll() {
         console.log('sending Delete All')
         this.write(toServer.deleteAll)
+        this.entries ={}
+        this.keymap = {}
     }
+    /**
+     * Executes an RPC
+     * @param id The ID of the RPC Entry
+     * @param val The Values of the Parameters
+     * @param callback To be called with the Results
+     */
     RPCExec(id: number, val: Object, callback: (result: Object) => any) {
         if (id in this.entries) return new Error('Does not exist')
         let entry = this.entries[id]
-        if (entry.type !== e.RPC) return new Error('Is not an RPC')
+        if (entry.typeID !== e.RPC) return new Error('Is not an RPC')
         console.log('Sending RPC Execute')
         let par = (<RPC>entry.val).par,
             f: toBufRes[] = [],
@@ -254,8 +338,8 @@ export class Client {
         for (let i = 0; i < par.length; i++) {
             parName = par[i].name
             value = parName in val ? val[par[i].name] : par[i].default
-            if (!checkType(value, par[i].type)) return new Error(`Wrong Type: ${value} is not a ${typeNames[par[i].type]}`)
-            let n = TypeBuf[par[i].type].toBuf(value)
+            if (!checkType(value, par[i].typeId)) return new Error(`Wrong Type: ${value} is not a ${typeNames[par[i].typeId]}`)
+            let n = TypeBuf[par[i].typeId].toBuf(value)
             len += n.length
             f.push(n)
         }
@@ -277,13 +361,24 @@ export class Client {
         this.RPCExecCallback[randId] = callback
     }
     private keys: string[]
-    readonly keepAlive = Buffer.from([0])
+    private readonly keepAlive = Buffer.from([0])
     private aliveTimer: NodeJS.Timer
-    write(buf: Buffer) {
+    private bufferTimer: NodeJS.Timer
+    private buffersToSend: Buffer[] = []
+    /**
+     * Direct Write to the Server
+     * @param buf The Buffer to be sent
+     * @param immediate whether the write should happen right away
+     */
+    write(buf: Buffer, immediate = false) {
         if (this.aliveTimer) clearTimeout(this.aliveTimer)
         this.aliveTimer = setTimeout(() => { this.write(this.keepAlive) }, 1000);
         this.aliveTimer.unref()
-        this.client.write(buf)
+        if (immediate) this.client.write(buf)
+        else {
+            this.buffersToSend.push(buf)
+            if (!this.bufferTimer) this.bufferTimer = setTimeout(() => this.client.write(Buffer.concat(this.buffersToSend)), 20)
+        }
     }
 }
 const typeNames = {
@@ -314,8 +409,8 @@ const toServer = {
     helloComplete: Buffer.from([0x05]),
     deleteAll: Buffer.from([0xD0, 0x6C, 0xB2, 0x7A])
 }
-interface Entry {
-    type: number,
+export interface Entry {
+    typeID: number,
     name: string,
     sn: number,
     flags: number,
@@ -333,15 +428,16 @@ const enum e {
 }
 interface RPC {
     name: string,
-    resLen: number,
     par: RPCDPar[]
 }
 interface RPCDPar {
-    type: number,
+    typeId: number,
+    typeName: string,
     name: string,
     default: any,
     result: {
-        type: number,
+        typeId: number,
+        typeName: string,
         name: string
     }[]
 }
@@ -370,8 +466,6 @@ interface fromBuf {
     0x11: f<number[]>
     0x12: f<string[]>
     0x20: f<RPC>
-    //0x21: f<number>,
-    //0x22: f<number>
 }
 
 const TypeBuf: fromBuf = {
@@ -542,24 +636,24 @@ const TypeBuf: fromBuf = {
                 parNum = buf[off],
                 par: RPCDPar[] = [],
                 s = { offset: 0, val: "" },
-                resNum = 0,
-                resLen = 0
+                resNum = 0
             off++
             for (let i = 0; i < parNum; i++) {
-                let lastPar: RPCDPar = { type: 0, name: "", default: 0, result: [] }
-                lastPar.type = buf[off]
+                let lastPar: RPCDPar = { typeId: 0, typeName: "", name: "", default: 0, result: [] }
+                lastPar.typeId = buf[off]
+                lastPar.typeName = typeNames[lastPar.typeId]
                 s = fromLEBuf(buf, off)
                 lastPar.name = s.val
                 off = s.offset
-                let t = TypesFrom[lastPar.type](buf, off)
+                let t = TypesFrom[lastPar.typeId](buf, off)
                 lastPar.default = t.val
                 off = t.offset
                 resNum = buf[off]
-                resLen += resNum
                 off++
                 for (let i = 0; i < resNum; i++) {
-                    let res = { type: 0, name: "" }
-                    res.type = buf[off]
+                    let res = { typeId: 0, typeName: "", name: "" }
+                    res.typeId = buf[off]
+                    res.typeName = typeNames[res.typeId]
                     s = fromLEBuf(buf, off + 1)
                     res.name = s.val
                     off = s.offset
@@ -571,7 +665,7 @@ const TypeBuf: fromBuf = {
                 offset: off,
                 val: {
                     name,
-                    resLen,
+                    //resLen,
                     par
                 }
             }
@@ -602,25 +696,10 @@ var TypesFrom: typesFrom = {
     0x20: TypeBuf[e.RPC].fromBuf,
     //0x21: TypeBuf[e.Byte].fromBuf
 }
-String.prototype.toLEBufA = function (this: string) {
-    let n = this.length
-    let r: number[] = []
-    while (n > 0x07f) {
-        r.push((n & 0x7f) | 0x80)
-        n = n >> 7
-    }
-    r.push(n)
-    return [...r, ...Buffer.from(this, 'utf8')]
-}
 function fromLEBuf(buf, offset) {
     let res = numFrom128(buf, offset),
         end = res.offset + res.val
     return { offset: end, val: buf.slice(res.offset, end).toString('utf8') }
-}
-Number.prototype.to754 = function (this: number) {
-    let b = Buffer.alloc(8)
-    ieee754.write(b, this, 0, false, 52, 8)
-    return [...b]
 }
 Number.prototype.to128 = function (this: number) {
     let n = this
@@ -648,10 +727,9 @@ function numFrom128(buf: Buffer, offset: number) {
 }
 declare global {
     interface Number {
-        to754(): number[]
+        /**
+         * Converts a number to a Buffer using LEB128
+         */
         to128(): Buffer
-    }
-    interface String {
-        toLEBufA(): number[]
     }
 }

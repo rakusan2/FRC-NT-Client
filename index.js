@@ -11,6 +11,7 @@ class Client {
         this.reconnect = false;
         this.listeners = [];
         this.RPCExecCallback = {};
+        this.lateCallbacks = [];
         this.recProto = {
             /** Protocol Version Unsupported */
             0x02: (buf, off) => {
@@ -22,8 +23,7 @@ class Client {
             },
             /** Server Hello Complete */
             0x03: (buf, off) => {
-                console.log('Server Hello');
-                this.connected = true;
+                console.log('Server Hello Complete');
                 this.toServer.HelloComplete();
                 return off;
             },
@@ -31,38 +31,49 @@ class Client {
             0x04: (buf, off) => {
                 console.log('Server Hello');
                 let flags = buf[off++];
-                let s = TypesFrom[2 /* String */](buf, off);
-                this.serverName = s.val;
-                return s.offset;
+                let sName = TypesFrom[2 /* String */](buf, off);
+                this.serverName = sName.val;
+                return sName.offset;
             },
             /** Entry Assignment */
             0x10: (buf, off) => {
-                let s = TypesFrom[2 /* String */](buf, off);
-                off = s.offset;
+                let keyName = TypesFrom[2 /* String */](buf, off);
+                off = keyName.offset;
                 let type = buf[off++], id = (buf[off++] << 8) + buf[off++], typeName = typeNames[type], entry = {
-                    type: type,
-                    name: s.val,
+                    typeID: type,
+                    name: keyName.val,
                     sn: (buf[off++] << 8) + buf[off++],
                     flags: buf[off++]
                 };
-                let val = TypesFrom[entry.type](buf, off);
+                let val = TypesFrom[entry.typeID](buf, off);
                 entry.val = val.val;
                 this.entries[id] = entry;
                 this.keymap[val.val] = id;
                 for (let i = 0; i < this.listeners.length; i++) {
-                    this.listeners[i](s.val, val.val, typeName, "add", id);
+                    if (this.connected) {
+                        this.listeners[i](keyName.val, val.val, typeName, "add", id);
+                    }
+                    else {
+                        this.lateCallbacks.push(() => this.listeners[i](keyName.val, val.val, typeName, "add", id));
+                    }
                 }
                 return val.offset;
             },
             /** Entry Update */
             0x11: (buf, off) => {
                 let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = buf[off++], val = TypesFrom[type](buf, off), typeName = typeNames[type], name = "";
-                if (id in this.entries && type === this.entries[id].type) {
-                    this.entries[id].sn = sn;
-                    this.entries[id].val = val.val;
-                    name = this.entries[id].name;
+                if (id in this.entries && type === this.entries[id].typeID) {
+                    let entry = this.entries[id];
+                    entry.sn = sn;
+                    entry.val = val.val;
+                    name = entry.name;
                     for (let i = 0; i < this.listeners.length; i++) {
-                        this.listeners[i](name, val.val, typeName, "update", id);
+                        if (this.connected) {
+                            this.listeners[i](name, val.val, typeName, "update", id);
+                        }
+                        else {
+                            this.lateCallbacks.push(() => this.listeners[i](name, val.val, typeName, "update", id));
+                        }
                     }
                 }
                 return val.offset;
@@ -77,11 +88,16 @@ class Client {
             },
             /** Entry Delete */
             0x13: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], name = this.entries[id].name, typename = typeNames[this.entries[id].type];
+                let id = (buf[off++] << 8) + buf[off++], name = this.entries[id].name, typename = typeNames[this.entries[id].typeID];
                 delete this.entries[id];
                 delete this.keymap[name];
                 for (let i = 0; i < this.listeners.length; i++) {
-                    this.listeners[i](name, null, typename, "delete", id);
+                    if (this.connected) {
+                        this.listeners[i](name, null, typename, "delete", id);
+                    }
+                    else {
+                        this.lateCallbacks.push(() => this.listeners[i](name, null, typename, "delete", id));
+                    }
                 }
                 return off;
             },
@@ -104,7 +120,7 @@ class Client {
                     let parRes = {};
                     res = par[i].result;
                     for (let i = 0; i < res.length; i++) {
-                        s = TypesFrom[res[i].type](buf, off);
+                        s = TypesFrom[res[i].typeId](buf, off);
                         off = s.offset;
                         parRes[res[i].name] = s.val;
                     }
@@ -125,24 +141,40 @@ class Client {
                 buf[1] = 3;
                 buf[2] = 0;
                 s.write(buf, 3);
-                this.write(buf);
+                this.write(buf, true);
             },
             HelloComplete: () => {
                 console.log('sending Hello Complete');
-                this.write(toServer.helloComplete);
+                this.write(toServer.helloComplete, true);
+                this.connected = true;
+                while (this.lateCallbacks.length) {
+                    this.lateCallbacks.shift()();
+                }
             }
         };
         this.keepAlive = Buffer.from([0]);
+        this.buffersToSend = [];
     }
+    /**
+     * True if the Client has completed its hello and is connected
+     */
+    isConnected() {
+        return this.isConnected;
+    }
+    /**
+     * Start the Client
+     * @param address Address of the Server. Default = "localhost"
+     * @param port Port of the Server. Default = 1735
+     */
     start(address = '127.0.0.1', port = 1735) {
         this.connected = false;
         this.address = address;
         this.port = port;
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName);
-            this.client.on('data', d => {
+            this.client.on('data', data => {
                 console.log('Receiving');
-                this.read(d, 0);
+                this.read(data, 0);
             });
         }).on('close', e => {
             console.log({ client: 'closed', error: e });
@@ -151,18 +183,40 @@ class Client {
             }
         });
     }
+    /**
+     * Add a Listener to be called on change of an Entry
+     * @param callback Listener
+     */
     addListener(callback) {
         this.listeners.push(callback);
     }
+    /**
+     * Get the unique ID of a key or the IDs of all keys if called empty
+     * @param key name of the key
+     */
     getKeyID(key) {
-        return this.keymap[key];
+        if (key == undefined) {
+            return this.keymap;
+        }
+        else
+            return this.keymap[key];
     }
+    /**
+     * Gets an Entry
+     * @param id ID of an Entry
+     */
     getEntry(id) {
         return this.entries[id];
     }
+    /**
+     * Get an Array of Keys
+     */
     getKeys() {
-        return this.keymap;
+        return Object.keys(this.keymap);
     }
+    /**
+     * Get All of the Entries
+     */
     getEntries() {
         return this.entries;
     }
@@ -174,6 +228,13 @@ class Client {
                 this.read(buf, off);
         }
     }
+    /**
+     * Add an Entry
+     * @param type ID of the type of the Value
+     * @param val The Value
+     * @param name The Key of the Entry
+     * @param persist Whether the Value should persist on the server through a restart
+     */
     Assign(type, val, name, persist = false) {
         console.log('sending Entry Assignment');
         let n = TypeBuf[2 /* String */].toBuf(name);
@@ -189,55 +250,80 @@ class Client {
         f.write(buf, nlen + 7);
         this.write(buf);
     }
+    /**
+     * Updates an Entry
+     * @param id The ID of the Entry
+     * @param val The value of the Entry
+     */
     Update(id, val) {
         if (!(id in this.entries))
-            return;
+            return new Error('ID not found');
         let entry = this.entries[id];
-        if (!checkType(val, entry.type))
-            return;
+        if (!checkType(val, entry.typeID))
+            return new Error('Wrong Type');
         console.log('sending Entry update');
         entry.val = val;
-        let f = TypeBuf[entry.type].toBuf(val), len = f.length + 6, buf = Buffer.allocUnsafe(len);
+        let f = TypeBuf[entry.typeID].toBuf(val), len = f.length + 6, buf = Buffer.allocUnsafe(len);
         entry.sn++;
         buf[0] = 0x11;
         buf[1] = id >> 8;
         buf[2] = id & 0xff;
         buf[3] = entry.sn >> 8;
         buf[4] = entry.sn & 0xff;
-        buf[5] = entry.type;
+        buf[5] = entry.typeID;
         f.write(buf, 6);
         this.write(buf);
     }
+    /**
+     * Updates the Flag of an Entry
+     * @param id The ID of the Entry
+     * @param persist Whether the Entry should persist through a restart on the server
+     */
     Flag(id, persist = false) {
         if (!(id in this.entries))
             return new Error('Does not exist');
         console.log('sending Update Flag');
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, persist ? 1 : 0]));
     }
+    /**
+     * Deletes an Entry
+     * @param id The ID of the Entry
+     */
     Delete(id) {
         if (!(id in this.entries))
             return new Error('Does not exist');
         console.log('sending Entry Delete');
         this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
     }
+    /**
+     * Deletes All Entries
+     */
     DeleteAll() {
         console.log('sending Delete All');
         this.write(toServer.deleteAll);
+        this.entries = {};
+        this.keymap = {};
     }
+    /**
+     * Executes an RPC
+     * @param id The ID of the RPC Entry
+     * @param val The Values of the Parameters
+     * @param callback To be called with the Results
+     */
     RPCExec(id, val, callback) {
         if (id in this.entries)
             return new Error('Does not exist');
         let entry = this.entries[id];
-        if (entry.type !== 32 /* RPC */)
+        if (entry.typeID !== 32 /* RPC */)
             return new Error('Is not an RPC');
         console.log('Sending RPC Execute');
         let par = entry.val.par, f = [], value, len = 0, parName = "";
         for (let i = 0; i < par.length; i++) {
             parName = par[i].name;
             value = parName in val ? val[par[i].name] : par[i].default;
-            if (!checkType(value, par[i].type))
-                return new Error(`Wrong Type: ${value} is not a ${typeNames[par[i].type]}`);
-            let n = TypeBuf[par[i].type].toBuf(value);
+            if (!checkType(value, par[i].typeId))
+                return new Error(`Wrong Type: ${value} is not a ${typeNames[par[i].typeId]}`);
+            let n = TypeBuf[par[i].typeId].toBuf(value);
             len += n.length;
             f.push(n);
         }
@@ -255,12 +341,23 @@ class Client {
         this.write(buf);
         this.RPCExecCallback[randId] = callback;
     }
-    write(buf) {
+    /**
+     * Direct Write to the Server
+     * @param buf The Buffer to be sent
+     * @param immediate whether the write should happen right away
+     */
+    write(buf, immediate = false) {
         if (this.aliveTimer)
             clearTimeout(this.aliveTimer);
         this.aliveTimer = setTimeout(() => { this.write(this.keepAlive); }, 1000);
         this.aliveTimer.unref();
-        this.client.write(buf);
+        if (immediate)
+            this.client.write(buf);
+        else {
+            this.buffersToSend.push(buf);
+            if (!this.bufferTimer)
+                this.bufferTimer = setTimeout(() => this.client.write(Buffer.concat(this.buffersToSend)), 20);
+        }
     }
 }
 exports.Client = Client;
@@ -461,23 +558,24 @@ const TypeBuf = {
             off++;
             st = fromLEBuf(buf, off);
             off = st.offset;
-            let name = st.val, parNum = buf[off], par = [], s = { offset: 0, val: "" }, resNum = 0, resLen = 0;
+            let name = st.val, parNum = buf[off], par = [], s = { offset: 0, val: "" }, resNum = 0;
             off++;
             for (let i = 0; i < parNum; i++) {
-                let lastPar = { type: 0, name: "", default: 0, result: [] };
-                lastPar.type = buf[off];
+                let lastPar = { typeId: 0, typeName: "", name: "", default: 0, result: [] };
+                lastPar.typeId = buf[off];
+                lastPar.typeName = typeNames[lastPar.typeId];
                 s = fromLEBuf(buf, off);
                 lastPar.name = s.val;
                 off = s.offset;
-                let t = TypesFrom[lastPar.type](buf, off);
+                let t = TypesFrom[lastPar.typeId](buf, off);
                 lastPar.default = t.val;
                 off = t.offset;
                 resNum = buf[off];
-                resLen += resNum;
                 off++;
                 for (let i = 0; i < resNum; i++) {
-                    let res = { type: 0, name: "" };
-                    res.type = buf[off];
+                    let res = { typeId: 0, typeName: "", name: "" };
+                    res.typeId = buf[off];
+                    res.typeName = typeNames[res.typeId];
                     s = fromLEBuf(buf, off + 1);
                     res.name = s.val;
                     off = s.offset;
@@ -489,7 +587,7 @@ const TypeBuf = {
                 offset: off,
                 val: {
                     name,
-                    resLen,
+                    //resLen,
                     par
                 }
             };
@@ -506,25 +604,10 @@ var TypesFrom = {
     0x12: TypeBuf[18 /* StringArray */].fromBuf,
     0x20: TypeBuf[32 /* RPC */].fromBuf,
 };
-String.prototype.toLEBufA = function () {
-    let n = this.length;
-    let r = [];
-    while (n > 0x07f) {
-        r.push((n & 0x7f) | 0x80);
-        n = n >> 7;
-    }
-    r.push(n);
-    return [...r, ...Buffer.from(this, 'utf8')];
-};
 function fromLEBuf(buf, offset) {
     let res = numFrom128(buf, offset), end = res.offset + res.val;
     return { offset: end, val: buf.slice(res.offset, end).toString('utf8') };
 }
-Number.prototype.to754 = function () {
-    let b = Buffer.alloc(8);
-    ieee754.write(b, this, 0, false, 52, 8);
-    return [...b];
-};
 Number.prototype.to128 = function () {
     let n = this;
     let r = [];

@@ -1,8 +1,9 @@
 {
-  "name": "code-network-table-client",
+  "name": "wpilib-nt-client",
   "version": "1.0.0",
   "description": "Client for FRC Network Tables",
   "main": "index.js",
+  "engines":{ "node":">4.0" },
   "scripts": {
     "test": "node test/test.js"
   },
@@ -13,10 +14,11 @@
   "keywords": [
     "FIRST",
     "FRC",
-    "NetworkTables"
+    "NetworkTables",
+    "wpilib"
   ],
   "author": "Tomas Rakusan",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/rakusan2/FRC-NT-Client/issues"
   },
