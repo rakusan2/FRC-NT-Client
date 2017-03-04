@@ -75,6 +75,16 @@ ntClient.addListener((key, val, type, id) => {
     - NumberArray
     - StringArray
     - RPC
+- valueID
+    - 0x00 : "Boolean"
+    - 0x01 : "Number"
+    - 0x02 : "String"
+    - 0x03 : "Buffer"
+    - 0x10 : "BooleanArray"
+    - 0x11 : "NumberArray"
+    - 0x12 : "StringArray"
+    - 0x20 : "RPC"
+
 
 ## RPC Entry Definition
 Remote Procedure Call
