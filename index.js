@@ -18,6 +18,8 @@ class Client {
                 var ver = `${buf[off++]}.${buf[off++]}`;
                 if (ver === '2.0')
                     this.reconnect = true;
+                else
+                    this.conCallback(false, new Error('Unsupported protocol: ' + ver));
                 return off;
             },
             /** Server Hello Complete */
@@ -142,6 +144,7 @@ class Client {
             HelloComplete: () => {
                 this.write(toServer.helloComplete, true);
                 this.connected = true;
+                this.conCallback(true, null);
                 while (this.lateCallbacks.length) {
                     this.lateCallbacks.shift()();
                 }
@@ -154,7 +157,7 @@ class Client {
      * True if the Client has completed its hello and is connected
      */
     isConnected() {
-        return this.isConnected;
+        return this.connected;
     }
     /**
      * Start the Client
@@ -166,16 +169,18 @@ class Client {
         this.connected = false;
         this.address = address;
         this.port = port;
+        this.conCallback = callback;
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName);
             this.client.on('data', data => {
                 this.read(data, 0);
             });
         }).on('close', e => {
+            this.connected = false;
             if (this.reconnect) {
                 this.start(callback, address, port);
             }
-        }).on('error', callback);
+        }).on('error', err => callback(false, err));
     }
     /**
      * Add a Listener to be called on change of an Entry

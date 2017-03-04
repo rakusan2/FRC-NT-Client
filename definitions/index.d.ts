@@ -13,17 +13,18 @@ export declare class Client {
     private listeners;
     private RPCExecCallback;
     private lateCallbacks;
+    private conCallback;
     /**
      * True if the Client has completed its hello and is connected
      */
-    isConnected(): () => any;
+    isConnected(): boolean;
     /**
      * Start the Client
      * @param callback Called When an error occurs
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(callback?: (err: Error) => any, address?: string, port?: number): void;
+    start(callback?: (connected: boolean, err: Error) => any, address?: string, port?: number): void;
     /**
      * Add a Listener to be called on change of an Entry
      * @param callback Listener

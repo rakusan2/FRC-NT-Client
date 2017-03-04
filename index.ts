@@ -14,11 +14,12 @@ export class Client {
     private listeners: Listener[] = []
     private RPCExecCallback: { [key: number]: (result: Object) => any } = {}
     private lateCallbacks: (() => any)[] = []
+    private conCallback: (connected: boolean, err: Error) => any
     /**
      * True if the Client has completed its hello and is connected
      */
     isConnected() {
-        return this.isConnected
+        return this.connected
     }
     /**
      * Start the Client
@@ -26,20 +27,22 @@ export class Client {
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(callback?: (err: Error) => any, address = '127.0.0.1', port = 1735) {
+    start(callback?: (connected: boolean, err: Error) => any, address = '127.0.0.1', port = 1735) {
         this.connected = false
         this.address = address
         this.port = port
+        this.conCallback = callback
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName)
             this.client.on('data', data => {
                 this.read(data, 0)
             })
         }).on('close', e => {
+            this.connected = false
             if (this.reconnect) {
                 this.start(callback, address, port)
             }
-        }).on('error', callback)
+        }).on('error', err => callback(false, err))
     }
     /**
      * Add a Listener to be called on change of an Entry
@@ -88,6 +91,7 @@ export class Client {
         0x02: (buf, off) => {
             var ver = `${buf[off++]}.${buf[off++]}`
             if (ver === '2.0') this.reconnect = true
+            else this.conCallback(false, new Error('Unsupported protocol: ' + ver))
             return off
         },
         /** Server Hello Complete */
@@ -230,6 +234,7 @@ export class Client {
         HelloComplete: () => {
             this.write(toServer.helloComplete, true)
             this.connected = true
+            this.conCallback(true, null)
             while (this.lateCallbacks.length) {
                 this.lateCallbacks.shift()()
             }

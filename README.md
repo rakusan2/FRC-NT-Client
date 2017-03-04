@@ -24,9 +24,10 @@ ntClient.addListener((key, val, type, id) => {
 })
 ```
 ## Properties
-- `.start(callback, address, port)`
+- `.start((connected, err) => any, address, port)`
     - Connects the client to a specific address and port
-    - **callback** - Is called when an error occurs
+    - **connected** - True if the client has successfully completed its handshake
+    - **err** - Contains the error if one has occurred
     - **address** - The address of the Server. Defaults to loopback
     - **port** - The port of the server
 - `.addListener((key, value, valueType, type, id) => any)`
