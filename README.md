@@ -13,7 +13,10 @@ npm install wpilib-nt-client
 const ntClient = require('wpilib-nt-client')
 
 // Connects the client to the server on team 3571's roborio
-ntClient.start('roborio-3571.local')
+ntClient.start(err=>{
+    // Displays the error
+    console.log({err})
+},'roborio-3571.local')
 
 // Adds a listener to the client
 ntClient.addListener((key, val, type, id) => {
@@ -21,9 +24,11 @@ ntClient.addListener((key, val, type, id) => {
 })
 ```
 ## Properties
-- `.start(address,port)`
+- `.start(callback, address, port)`
     - Connects the client to a specific address and port
-    - Both **address** and **port** default to "loopback" and 1735 respectively if left out
+    - **callback** - Is called when an error occurs
+    - **address** - The address of the Server. Defaults to loopback
+    - **port** - The port of the server
 - `.addListener((key, value, valueType, type, id) => any)`
     - Adds a callback to be called when a value has been added, updated, or deleted
     - **key** - The Key for the value

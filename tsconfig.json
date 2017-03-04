@@ -4,6 +4,10 @@
         "target": "es2015",
         "noImplicitAny": false,
         "sourceMap": false,
-        "declaration": true
-    }
+        "declaration": true,
+        "declarationDir": "definitions"
+    },
+    "exclude": [
+        "definitions"
+    ]
 }

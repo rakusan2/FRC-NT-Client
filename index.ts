@@ -17,15 +17,16 @@ export class Client {
     /**
      * True if the Client has completed its hello and is connected
      */
-    isConnected(){
+    isConnected() {
         return this.isConnected
     }
     /**
      * Start the Client
+     * @param callback Called When an error occurs
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(address = '127.0.0.1', port = 1735) {
+    start(callback?: (err: Error) => any, address = '127.0.0.1', port = 1735) {
         this.connected = false
         this.address = address
         this.port = port
@@ -38,9 +39,9 @@ export class Client {
         }).on('close', e => {
             console.log({ client: 'closed', error: e })
             if (this.reconnect) {
-                this.start(address, port)
+                this.start(callback, address, port)
             }
-        })
+        }).on('error', callback)
     }
     /**
      * Add a Listener to be called on change of an Entry
@@ -237,7 +238,7 @@ export class Client {
             console.log('sending Hello Complete')
             this.write(toServer.helloComplete, true)
             this.connected = true
-            while(this.lateCallbacks.length){
+            while (this.lateCallbacks.length) {
                 this.lateCallbacks.shift()()
             }
         }
@@ -316,7 +317,7 @@ export class Client {
     DeleteAll() {
         console.log('sending Delete All')
         this.write(toServer.deleteAll)
-        this.entries ={}
+        this.entries = {}
         this.keymap = {}
     }
     /**

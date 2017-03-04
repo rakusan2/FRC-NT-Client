@@ -163,10 +163,11 @@ class Client {
     }
     /**
      * Start the Client
+     * @param callback Called When an error occurs
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(address = '127.0.0.1', port = 1735) {
+    start(callback, address = '127.0.0.1', port = 1735) {
         this.connected = false;
         this.address = address;
         this.port = port;
@@ -179,9 +180,9 @@ class Client {
         }).on('close', e => {
             console.log({ client: 'closed', error: e });
             if (this.reconnect) {
-                this.start(address, port);
+                this.start(callback, address, port);
             }
-        });
+        }).on('error', callback);
     }
     /**
      * Add a Listener to be called on change of an Entry

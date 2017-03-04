@@ -19,10 +19,11 @@ export declare class Client {
     isConnected(): () => any;
     /**
      * Start the Client
+     * @param callback Called When an error occurs
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(address?: string, port?: number): void;
+    start(callback?: (err: Error) => any, address?: string, port?: number): void;
     /**
      * Add a Listener to be called on change of an Entry
      * @param callback Listener
