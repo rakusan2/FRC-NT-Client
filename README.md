@@ -13,9 +13,9 @@ npm install wpilib-nt-client
 const ntClient = require('wpilib-nt-client')
 
 // Connects the client to the server on team 3571's roborio
-ntClient.start(err=>{
+ntClient.start((isConnected, err))=>{
     // Displays the error
-    console.log({err})
+    console.log({ isConnected, err })
 },'roborio-3571.local')
 
 // Adds a listener to the client
