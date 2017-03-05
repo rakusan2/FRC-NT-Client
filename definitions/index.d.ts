@@ -1,5 +1,5 @@
 /// <reference types="node" />
-export declare type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update" | "flagChange", id: number) => any;
+export declare type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update" | "flagChange", id: number, flags: number) => any;
 export declare class Client {
     serverName: String;
     clientName: string;

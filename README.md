@@ -30,12 +30,14 @@ ntClient.addListener((key, val, type, id) => {
     - **err** - Contains the error if one has occurred
     - **address** - The address of the Server. Defaults to loopback
     - **port** - The port of the server
-- `.addListener((key, value, valueType, type, id) => any)`
+- `.addListener((key, value, valueType, type, id, flags) => any)`
     - Adds a callback to be called when a value has been added, updated, or deleted
-    - **key** - The Key for the value
+    - **key** - The Key for the Entry
     - **value** - The value associated with the key
     - **valueType** - The type of the value Possible Types are listed Bellow
     - **type** - The type of the callback. Possible Types are: "add", "update", "delete", "flagChange"
+    - **id** - The ID of the Entry
+    - **flags** - The flags of the Entry
 - `.getKeyID(key)`
     - Returns the ID of a key or All of the keys if key if left out
 - `.getEntry(id)`

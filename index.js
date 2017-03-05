@@ -50,10 +50,10 @@ class Client {
                 this.keymap[val.val] = id;
                 for (let i = 0; i < this.listeners.length; i++) {
                     if (this.connected) {
-                        this.listeners[i](keyName.val, val.val, typeName, "add", id);
+                        this.listeners[i](keyName.val, val.val, typeName, "add", id, entry.flags);
                     }
                     else {
-                        this.lateCallbacks.push(() => this.listeners[i](keyName.val, val.val, typeName, "add", id));
+                        this.lateCallbacks.push(() => this.listeners[i](keyName.val, val.val, typeName, "add", id, entry.flags));
                     }
                 }
                 return val.offset;
@@ -68,10 +68,10 @@ class Client {
                     name = entry.name;
                     for (let i = 0; i < this.listeners.length; i++) {
                         if (this.connected) {
-                            this.listeners[i](name, val.val, typeName, "update", id);
+                            this.listeners[i](name, val.val, typeName, "update", id, entry.flags);
                         }
                         else {
-                            this.lateCallbacks.push(() => this.listeners[i](name, val.val, typeName, "update", id));
+                            this.lateCallbacks.push(() => this.listeners[i](name, val.val, typeName, "update", id, entry.flags));
                         }
                     }
                 }
@@ -85,10 +85,10 @@ class Client {
                     entry.flags = flags;
                     for (let i = 0; i < this.listeners.length; i++) {
                         if (this.connected) {
-                            this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id);
+                            this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id, flags);
                         }
                         else {
-                            this.lateCallbacks.push(() => this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id));
+                            this.lateCallbacks.push(() => this.listeners[i](entry.name, entry.val, typeNames[entry.typeID], "flagChange", id, flags));
                         }
                     }
                 }
@@ -96,15 +96,15 @@ class Client {
             },
             /** Entry Delete */
             0x13: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], name = this.entries[id].name, typename = typeNames[this.entries[id].typeID];
+                let id = (buf[off++] << 8) + buf[off++], name = this.entries[id].name, typename = typeNames[this.entries[id].typeID], flags = this.entries[id].flags;
                 delete this.entries[id];
                 delete this.keymap[name];
                 for (let i = 0; i < this.listeners.length; i++) {
                     if (this.connected) {
-                        this.listeners[i](name, null, typename, "delete", id);
+                        this.listeners[i](name, null, typename, "delete", id, flags);
                     }
                     else {
-                        this.lateCallbacks.push(() => this.listeners[i](name, null, typename, "delete", id));
+                        this.lateCallbacks.push(() => this.listeners[i](name, null, typename, "delete", id, flags));
                     }
                 }
                 return off;
