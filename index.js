@@ -123,16 +123,13 @@ class Client {
             },
             /** RPC Response */
             0x21: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], executeID = (buf[off++] << 8) + buf[off++], len = fromLEBuf(buf, off), par = this.entries[id].val.par, res, results = {}, s;
-                for (let i = 0; i < par.length; i++) {
-                    let parRes = {};
-                    res = par[i].result;
+                let id = (buf[off++] << 8) + buf[off++], executeID = (buf[off++] << 8) + buf[off++], len = fromLEBuf(buf, off), res = this.entries[id].val.results, results = {}, s;
+                for (let i = 0; i < res.length; i++) {
                     for (let i = 0; i < res.length; i++) {
                         s = TypesFrom[res[i].typeId](buf, off);
                         off = s.offset;
-                        parRes[res[i].name] = s.val;
+                        results[res[i].name] = s.val;
                     }
-                    results[par[i].name] = parRes;
                 }
                 if (executeID in this.RPCExecCallback) {
                     this.RPCExecCallback[executeID](results);
@@ -559,10 +556,10 @@ const TypeBuf = {
             off++;
             st = fromLEBuf(buf, off);
             off = st.offset;
-            let name = st.val, parNum = buf[off], par = [], s = { offset: 0, val: "" }, resNum = 0;
+            let name = st.val, parNum = buf[off], par = [], results = [], s = { offset: 0, val: "" }, resNum = 0;
             off++;
             for (let i = 0; i < parNum; i++) {
-                let lastPar = { typeId: 0, typeName: "", name: "", default: 0, result: [] };
+                let lastPar = { typeId: 0, typeName: "", name: "", default: 0 };
                 lastPar.typeId = buf[off];
                 lastPar.typeName = typeNames[lastPar.typeId];
                 s = fromLEBuf(buf, off);
@@ -571,25 +568,24 @@ const TypeBuf = {
                 let t = TypesFrom[lastPar.typeId](buf, off);
                 lastPar.default = t.val;
                 off = t.offset;
-                resNum = buf[off];
-                off++;
-                for (let i = 0; i < resNum; i++) {
-                    let res = { typeId: 0, typeName: "", name: "" };
-                    res.typeId = buf[off];
-                    res.typeName = typeNames[res.typeId];
-                    s = fromLEBuf(buf, off + 1);
-                    res.name = s.val;
-                    off = s.offset;
-                    lastPar.result.push(res);
-                }
                 par.push(lastPar);
+            }
+            resNum = buf[off++];
+            for (let i = 0; i < resNum; i++) {
+                let res = { typeId: 0, typeName: "", name: "" };
+                res.typeId = buf[off];
+                res.typeName = typeNames[res.typeId];
+                s = fromLEBuf(buf, off + 1);
+                res.name = s.val;
+                off = s.offset;
+                results.push(res);
             }
             return {
                 offset: off,
                 val: {
                     name,
-                    //resLen,
-                    par
+                    par,
+                    results
                 }
             };
         }

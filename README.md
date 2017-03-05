@@ -107,16 +107,16 @@ RPC:{
         // Name of the Parameter
         name,
         // Default value for the parameter
-        default,
-        // The format of the results
-        result:{
-            // The Id of the type of the result
-            typeId,
-            // The name of the Type of the result
-            typeName,
-            // The name of the result
-            name
-        }[]
+        default
+    }[],
+    // The format of the results
+    results:{
+        // The Id of the type of the result
+        typeId,
+        // The name of the Type of the result
+        typeName,
+        // The name of the result
+        name
     }[]
 }
 ```

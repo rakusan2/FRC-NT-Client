@@ -209,19 +209,15 @@ export class Client {
             let id = (buf[off++] << 8) + buf[off++],
                 executeID = (buf[off++] << 8) + buf[off++],
                 len = fromLEBuf(buf, off),
-                par = (<RPC>this.entries[id].val).par,
-                res: { typeId: number, name: string }[],
+                res = (<RPC>this.entries[id].val).results,
                 results = {},
                 s: { val: any, offset: number }
-            for (let i = 0; i < par.length; i++) {
-                let parRes = {}
-                res = par[i].result
+            for (let i = 0; i < res.length; i++) {
                 for (let i = 0; i < res.length; i++) {
                     s = TypesFrom[res[i].typeId](buf, off)
                     off = s.offset
-                    parRes[res[i].name] = s.val
+                    results[res[i].name] = s.val
                 }
-                results[par[i].name] = parRes
             }
             if (executeID in this.RPCExecCallback) {
                 this.RPCExecCallback[executeID](results)
@@ -429,18 +425,19 @@ const enum e {
 }
 interface RPC {
     name: string,
-    par: RPCDPar[]
+    par: RPCPar[],
+    results: RPCResult[]
 }
-interface RPCDPar {
+interface RPCPar {
     typeId: number,
     typeName: string,
     name: string,
-    default: any,
-    result: {
-        typeId: number,
-        typeName: string,
-        name: string
-    }[]
+    default: any
+}
+interface RPCResult {
+    typeId: number,
+    typeName: string,
+    name: string
 }
 type bufFrom<T> = (buf: Buffer, offset: number) => {
     offset: number,
@@ -635,12 +632,13 @@ const TypeBuf: fromBuf = {
             off = st.offset
             let name = st.val,
                 parNum = buf[off],
-                par: RPCDPar[] = [],
+                par: RPCPar[] = [],
+                results: RPCResult[] = [],
                 s = { offset: 0, val: "" },
                 resNum = 0
             off++
             for (let i = 0; i < parNum; i++) {
-                let lastPar: RPCDPar = { typeId: 0, typeName: "", name: "", default: 0, result: [] }
+                let lastPar: RPCPar = { typeId: 0, typeName: "", name: "", default: 0 }
                 lastPar.typeId = buf[off]
                 lastPar.typeName = typeNames[lastPar.typeId]
                 s = fromLEBuf(buf, off)
@@ -649,25 +647,24 @@ const TypeBuf: fromBuf = {
                 let t = TypesFrom[lastPar.typeId](buf, off)
                 lastPar.default = t.val
                 off = t.offset
-                resNum = buf[off]
-                off++
-                for (let i = 0; i < resNum; i++) {
-                    let res = { typeId: 0, typeName: "", name: "" }
-                    res.typeId = buf[off]
-                    res.typeName = typeNames[res.typeId]
-                    s = fromLEBuf(buf, off + 1)
-                    res.name = s.val
-                    off = s.offset
-                    lastPar.result.push(res)
-                }
                 par.push(lastPar)
+            }
+            resNum = buf[off++]
+            for (let i = 0; i < resNum; i++) {
+                let res: RPCResult = { typeId: 0, typeName: "", name: "" }
+                res.typeId = buf[off]
+                res.typeName = typeNames[res.typeId]
+                s = fromLEBuf(buf, off + 1)
+                res.name = s.val
+                off = s.offset
+                results.push(res)
             }
             return {
                 offset: off,
                 val: {
                     name,
-                    //resLen,
-                    par
+                    par,
+                    results
                 }
             }
         }
