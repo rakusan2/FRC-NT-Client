@@ -713,10 +713,10 @@ Number.prototype.to128 = function (this: number) {
 function numFrom128(buf: Buffer, offset: number) {
     let r = 0, n = buf[offset]
     offset++
-    r = n;
+    r = n & 0x7f;
     while (n > 0x7f) {
         n = buf[offset]
-        r = (r << 7) + n & 0x7f
+        r = (r << 7) + (n & 0x7f)
         offset++
     }
     return {
