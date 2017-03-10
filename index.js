@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const ieee754 = require("ieee754");
 const net = require("net");
+var strLenIdent = numTo128;
 class Client {
     constructor() {
         this.clientName = "node" + +new Date();
@@ -12,19 +13,28 @@ class Client {
         this.listeners = [];
         this.RPCExecCallback = {};
         this.lateCallbacks = [];
+        this.is2_0 = false;
         this.recProto = {
             /** Protocol Version Unsupported */
             0x02: (buf, off) => {
                 var ver = `${buf[off++]}.${buf[off++]}`;
-                if (ver === '2.0')
+                if (ver === '2.0') {
                     this.reconnect = true;
+                    this.is2_0 = true;
+                    strLenIdent = numTo2Byte;
+                }
                 else
-                    this.conCallback(false, new Error('Unsupported protocol: ' + ver));
+                    this.conCallback(false, new Error('Unsupported protocol: ' + ver), this.is2_0);
                 return off;
             },
             /** Server Hello Complete */
             0x03: (buf, off) => {
-                this.toServer.HelloComplete();
+                if (this.is2_0) {
+                    this.afterConnect();
+                }
+                else {
+                    this.toServer.HelloComplete();
+                }
                 return off;
             },
             /** Server Hello */
@@ -140,20 +150,21 @@ class Client {
         };
         this.toServer = {
             Hello: (serverName) => {
-                let s = TypeBuf[2 /* String */].toBuf(serverName), buf = Buffer.allocUnsafe(s.length + 3);
-                buf[0] = 0x01;
-                buf[1] = 3;
-                buf[2] = 0;
-                s.write(buf, 3);
-                this.write(buf, true);
+                if (this.is2_0) {
+                    this.write(toServer.hello2_0);
+                }
+                else {
+                    let s = TypeBuf[2 /* String */].toBuf(serverName), buf = Buffer.allocUnsafe(s.length + 3);
+                    buf[0] = 0x01;
+                    buf[1] = 3;
+                    buf[2] = 0;
+                    s.write(buf, 3);
+                    this.write(buf, true);
+                }
             },
             HelloComplete: () => {
                 this.write(toServer.helloComplete, true);
-                this.connected = true;
-                this.conCallback(true, null);
-                while (this.lateCallbacks.length) {
-                    this.lateCallbacks.shift()();
-                }
+                this.afterConnect();
             }
         };
         this.keepAlive = Buffer.from([0]);
@@ -166,8 +177,14 @@ class Client {
         return this.connected;
     }
     /**
+     * True if the client has switched to 2.0
+     */
+    uses2_0() {
+        return this.is2_0;
+    }
+    /**
      * Start the Client
-     * @param callback Called When an error occurs
+     * @param callback Called on connect or error
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
@@ -186,7 +203,7 @@ class Client {
             if (this.reconnect) {
                 this.start(callback, address, port);
             }
-        }).on('error', err => callback(false, err));
+        }).on('error', err => callback(false, err, this.is2_0));
     }
     /**
      * Add a Listener to be called on change of an Entry
@@ -232,16 +249,26 @@ class Client {
                 this.read(buf, off);
         }
     }
+    afterConnect() {
+        this.connected = true;
+        this.conCallback(true, null, this.is2_0);
+        while (this.lateCallbacks.length) {
+            this.lateCallbacks.shift()();
+        }
+    }
     /**
      * Add an Entry
-     * @param type ID of the type of the Value
      * @param val The Value
      * @param name The Key of the Entry
      * @param persist Whether the Value should persist on the server through a restart
      */
-    Assign(type, val, name, persist = false) {
-        let n = TypeBuf[2 /* String */].toBuf(name);
-        let f = TypeBuf[type].toBuf(val), nlen = n.length, len = f.length + nlen + 7, buf = Buffer.allocUnsafe(len);
+    Assign(val, name, persist = false) {
+        let type = getType(val);
+        if (this.is2_0 && type === 3 /* RawData */)
+            return new Error('2.0 does not have Raw Data');
+        if (type === 32 /* RPC */)
+            return new Error('Clients can not assign an RPC');
+        let n = TypeBuf[2 /* String */].toBuf(name), f = TypeBuf[type].toBuf(val), nlen = n.length, assignLen = this.is2_0 ? 6 : 7, len = f.length + nlen + assignLen, buf = Buffer.allocUnsafe(len);
         buf[0] = 0x10;
         n.write(buf, 1);
         buf[nlen + 1] = type;
@@ -249,8 +276,9 @@ class Client {
         buf[nlen + 3] = 0xff;
         buf[nlen + 4] = 0;
         buf[nlen + 5] = 0;
-        buf[nlen + 6] = persist ? 1 : 0;
-        f.write(buf, nlen + 7);
+        if (!this.is2_0)
+            buf[nlen + 6] = persist ? 1 : 0;
+        f.write(buf, nlen + assignLen);
         this.write(buf);
     }
     /**
@@ -265,15 +293,16 @@ class Client {
         if (!checkType(val, entry.typeID))
             return new Error('Wrong Type');
         entry.val = val;
-        let f = TypeBuf[entry.typeID].toBuf(val), len = f.length + 6, buf = Buffer.allocUnsafe(len);
+        let f = TypeBuf[entry.typeID].toBuf(val), updateLen = this.is2_0 ? 5 : 6, len = f.length + updateLen, buf = Buffer.allocUnsafe(len);
         entry.sn++;
         buf[0] = 0x11;
         buf[1] = id >> 8;
         buf[2] = id & 0xff;
         buf[3] = entry.sn >> 8;
         buf[4] = entry.sn & 0xff;
-        buf[5] = entry.typeID;
-        f.write(buf, 6);
+        if (!this.is2_0)
+            buf[5] = entry.typeID;
+        f.write(buf, updateLen);
         this.write(buf);
     }
     /**
@@ -282,6 +311,8 @@ class Client {
      * @param persist Whether the Entry should persist through a restart on the server
      */
     Flag(id, persist = false) {
+        if (this.is2_0)
+            return new Error('2.0 does not support flags');
         if (!(id in this.entries))
             return new Error('Does not exist');
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, persist ? 1 : 0]));
@@ -291,6 +322,8 @@ class Client {
      * @param id The ID of the Entry
      */
     Delete(id) {
+        if (this.is2_0)
+            return new Error('2.0 does not support delete');
         if (!(id in this.entries))
             return new Error('Does not exist');
         this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
@@ -299,6 +332,8 @@ class Client {
      * Deletes All Entries
      */
     DeleteAll() {
+        if (this.is2_0)
+            return new Error('2.0 does not support delete');
         this.write(toServer.deleteAll);
         this.entries = {};
         this.keymap = {};
@@ -310,6 +345,8 @@ class Client {
      * @param callback To be called with the Results
      */
     RPCExec(id, val, callback) {
+        if (this.is2_0)
+            return new Error('2.0 does not support RPC');
         if (id in this.entries)
             return new Error('Does not exist');
         let entry = this.entries[id];
@@ -325,7 +362,7 @@ class Client {
             len += n.length;
             f.push(n);
         }
-        let encLen = len.to128(), buf = Buffer.allocUnsafe(len + encLen.length + 5), off = 5 + encLen.length, randId = Math.floor(Math.random() * 0xffff);
+        let encLen = numTo128(len), buf = Buffer.allocUnsafe(len + encLen.length + 5), off = 5 + encLen.length, randId = Math.floor(Math.random() * 0xffff);
         buf[0] = 0x21;
         buf[1] = id >> 8;
         buf[2] = id & 0xff;
@@ -393,9 +430,32 @@ function checkType(val, type) {
             return false;
     }
 }
+function getType(val) {
+    if (Array.isArray(val)) {
+        if (typeof val[0] === "boolean")
+            return 0x10;
+        else if (typeof val[0] === "number")
+            return 0x11;
+        else if (typeof val[0] === "string")
+            return 0x12;
+        else if (typeof val[0] === "object")
+            return 0x20;
+    }
+    else {
+        if (typeof val === "boolean")
+            return 0x00;
+        else if (typeof val === "number")
+            return 0x01;
+        else if (typeof val === "string")
+            return 0x02;
+        else if (Buffer.isBuffer(val))
+            return 0x03;
+    }
+}
 const toServer = {
     helloComplete: Buffer.from([0x05]),
-    deleteAll: Buffer.from([0xD0, 0x6C, 0xB2, 0x7A])
+    deleteAll: Buffer.from([0x14, 0xD0, 0x6C, 0xB2, 0x7A]),
+    hello2_0: Buffer.from([0x01, 2, 0])
 };
 const TypeBuf = {
     0x00: {
@@ -432,7 +492,7 @@ const TypeBuf = {
     },
     0x02: {
         toBuf: (val) => {
-            let bufT = Buffer.concat([val.length.to128(), Buffer.from(val, 'utf8')]);
+            let bufT = Buffer.concat([strLenIdent(val.length), Buffer.from(val, 'utf8')]);
             return {
                 length: bufT.length,
                 write: (buf, off) => {
@@ -446,7 +506,7 @@ const TypeBuf = {
     },
     0x03: {
         toBuf: (val) => {
-            let len = val.length.to128();
+            let len = numTo128(val.length);
             return {
                 length: val.length + len.length,
                 write: (buf, off) => {
@@ -518,7 +578,7 @@ const TypeBuf = {
         toBuf: (val) => {
             let lens = [], len = 1;
             for (let i = 0; i < val.length; i++) {
-                lens[i] = Buffer.concat([val[i].length.to128(), Buffer.from(val[i])]);
+                lens[i] = Buffer.concat([strLenIdent(val[i].length), Buffer.from(val[i])]);
                 len += lens[i].length;
             }
             return {
@@ -605,8 +665,8 @@ function fromLEBuf(buf, offset) {
     let res = numFrom128(buf, offset), end = res.offset + res.val;
     return { offset: end, val: buf.slice(res.offset, end).toString('utf8') };
 }
-Number.prototype.to128 = function () {
-    let n = this;
+function numTo128(num) {
+    let n = num;
     let r = [];
     while (n > 0x07f) {
         r.push((n & 0x7f) | 0x80);
@@ -614,7 +674,10 @@ Number.prototype.to128 = function () {
     }
     r.push(n);
     return Buffer.from(r);
-};
+}
+function numTo2Byte(num) {
+    return Buffer.from([(this >> 8) & 0xff, this & 0xff]);
+}
 function numFrom128(buf, offset) {
     let r = 0, n = buf[offset];
     offset++;

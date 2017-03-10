@@ -5,9 +5,9 @@
         "noImplicitAny": false,
         "sourceMap": false,
         "declaration": true,
-        "declarationDir": "definitions"
+        "declarationDir": "types"
     },
     "exclude": [
-        "definitions"
+        "types"
     ]
 }

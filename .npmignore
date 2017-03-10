@@ -5,4 +5,4 @@ tsconfig.json
 *.ts
 *.log
 !*.d.ts
-definitions/test/
+types/test/

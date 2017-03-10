@@ -14,17 +14,22 @@ export declare class Client {
     private RPCExecCallback;
     private lateCallbacks;
     private conCallback;
+    private is2_0;
     /**
      * True if the Client has completed its hello and is connected
      */
     isConnected(): boolean;
     /**
+     * True if the client has switched to 2.0
+     */
+    uses2_0(): boolean;
+    /**
      * Start the Client
-     * @param callback Called When an error occurs
+     * @param callback Called on connect or error
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(callback?: (connected: boolean, err: Error) => any, address?: string, port?: number): void;
+    start(callback?: (connected: boolean, err: Error, is2_0: boolean) => any, address?: string, port?: number): void;
     /**
      * Add a Listener to be called on change of an Entry
      * @param callback Listener
@@ -54,15 +59,15 @@ export declare class Client {
     };
     private read(buf, off);
     private readonly recProto;
+    private afterConnect();
     private readonly toServer;
     /**
      * Add an Entry
-     * @param type ID of the type of the Value
      * @param val The Value
      * @param name The Key of the Entry
      * @param persist Whether the Value should persist on the server through a restart
      */
-    Assign(type: number, val: any, name: string, persist?: boolean): void;
+    Assign(val: any, name: string, persist?: boolean): Error;
     /**
      * Updates an Entry
      * @param id The ID of the Entry
@@ -83,7 +88,7 @@ export declare class Client {
     /**
      * Deletes All Entries
      */
-    DeleteAll(): void;
+    DeleteAll(): Error;
     /**
      * Executes an RPC
      * @param id The ID of the RPC Entry
@@ -110,12 +115,3 @@ export interface Entry {
     flags: number;
     val?: any;
 }
-declare global  {
-    interface Number {
-        /**
-         * Converts a number to a Buffer using LEB128
-         */
-        to128(): Buffer;
-    }
-}
-export {};

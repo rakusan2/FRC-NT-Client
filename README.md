@@ -1,5 +1,6 @@
 # WPILIB Network Tables Client
-This client uses version 3.0 of the [Network Tables Protocol](https://github.com/wpilibsuite/ntcore/blob/master/doc/networktables3.adoc)
+This client uses version [3.0](https://github.com/wpilibsuite/ntcore/blob/master/doc/networktables3.adoc)
+ of the **Network Tables Protocol**. With a failover to [2.0](https://github.com/wpilibsuite/ntcore/blob/master/doc/networktables2.adoc)
 
 ## Installation
 ```
@@ -14,7 +15,7 @@ const ntClient = require('wpilib-nt-client');
 
 // Connects the client to the server on team 3571's roborio
 ntClient.start((isConnected, err) => {
-    // Displays the error
+    // Displays the error and the state of connection
     console.log({ isConnected, err });
 }, 'roborio-3571.local');
 
@@ -24,10 +25,11 @@ ntClient.addListener((key, val, type, id) => {
 })
 ```
 ## Properties
-- `.start((connected, err) => any, address, port)`
+- `.start((connected, err, is2_0) => any, address, port)`
     - Connects the client to a specific address and port
     - **connected** - True if the client has successfully completed its handshake
     - **err** - Contains the error if one has occurred
+    - **is2_0** - True if the client had to failover to 2.0 of the Network Tables protocol
     - **address** - The address of the Server. Defaults to loopback
     - **port** - The port of the server
 - `.addListener((key, value, valueType, type, id, flags) => any)`
@@ -38,16 +40,20 @@ ntClient.addListener((key, val, type, id) => {
     - **type** - The type of the callback. Possible Types are: "add", "update", "delete", "flagChange"
     - **id** - The ID of the Entry
     - **flags** - The flags of the Entry
+- `.isConnected()`
+    - Returns true if the client is connected and has completed its handshake
+- `.uses2_0()`
+    - Returns true if the client has switched to using version 2.0 of the NetworkTables protocol
 - `.getKeyID(key)`
-    - Returns the ID of a key or All of the keys if key if left out
+    - Returns the ID of a key or All of the keys if **key** is left out
 - `.getEntry(id)`
     - Returns an Entry identified with an ID
-- `.Assign(type, val, name, persist)`
+- `.Assign(val, name, persist)`
     - Sets a new Entry
-    - **type** - A number representing the type
     - **val** - The Value being added
     - **name** - The Key for the Entry
     - **persist** - An optional boolean value of whether the value shoud stay on the server after a restart
+    - Can return an error if type is an RPC
 - `.Update(id, val)`
     - **id** - The ID of the Entry to be updated
     - **val** - The new Value
@@ -63,6 +69,7 @@ ntClient.addListener((key, val, type, id) => {
     - Can Return an error if the Entry does not exist
 - `.DeleteAll()`
     - Deletes all of the Entries
+    - Returns an error if the type is the client is using 2.0
 - `.RPCExec(id, val, (result) => any)`
     - Calls a Remote Procedure
     - **id** - The ID of the procedure
@@ -93,6 +100,10 @@ ntClient.addListener((key, val, type, id) => {
     - 0x12 : "StringArray"
     - 0x20 : "RPC"
 
+## In 2.0
+- Delete does not work
+- Flags do not exist
+- RPC does not exist
 
 ## RPC Entry Definition
 Remote Procedure Call
