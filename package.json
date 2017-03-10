@@ -3,7 +3,7 @@
   "version": "1.2.0",
   "description": "Client for FRC Network Tables",
   "main": "index.js",
-  "types": "definitions/index.d.ts",
+  "types": "types/index.d.ts",
   "engines": {
     "node": ">4.0"
   },
