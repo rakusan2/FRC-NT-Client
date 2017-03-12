@@ -4,14 +4,18 @@ var strLenIdent = numTo128
 export type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update" | "flagChange", id: number, flags: number) => any
 export class Client {
     serverName: String
-    clientName = "node" + +new Date()
+    clientName = "NodeJS" + +new Date()
     private client: net.Socket
     private connected = false
     private entries: { [key: number]: Entry } = {}
+    private oldEntries: { [key: number]: Entry } = {}
     private keymap: { [key: string]: number } = {}
+    private newKeyMap: newEntry[] = []
+    private updatedIDs: number[] = []
     private reconnect = false
     private address: string
     private port: number
+    private known = false
     private listeners: Listener[] = []
     private RPCExecCallback: { [key: number]: (result: Object) => any } = {}
     private lateCallbacks: (() => any)[] = []
@@ -45,11 +49,14 @@ export class Client {
             this.client.on('data', data => {
                 this.read(data, 0)
             })
-        }).on('close', e => {
+        }).on('close', hadError => {
             this.connected = false
+            this.oldEntries = this.entries
+            this.entries = {}
+            this.keymap = {}
             if (this.reconnect) {
                 this.start(callback, address, port)
-            }
+            } else if (!hadError) callback(false, null, this.is2_0)
         }).on('error', err => callback(false, err, this.is2_0))
     }
     /**
@@ -108,16 +115,35 @@ export class Client {
         },
         /** Server Hello Complete */
         0x03: (buf, off) => {
+            this.connected = true
+            for (let key in this.oldEntries) {
+                if (!(key in this.entries)) {
+                    let old = this.oldEntries[key]
+                    this.Assign(old.val, old.name, old.flags > 0)
+                }
+            }
             if (this.is2_0) {
                 this.afterConnect()
             } else {
+                this.newKeyMap.map(e => {
+                    if (!(e.name in this.keymap)) {
+                        this.Assign(e.val, e.name, e.flags > 0)
+                    }
+                })
                 this.toServer.HelloComplete()
+                if (this.known) {
+                    while (this.updatedIDs.length > 0) {
+                        let e = this.updatedIDs.pop()
+                        if (e in this.entries) this.Update(e, this.entries[e].val)
+                    }
+                }
             }
             return off
         },
         /** Server Hello */
         0x04: (buf, off) => {
-            let flags = buf[off++]
+            let flags = this.is2_0 ? 0 : buf[off++]
+            this.known = flags > 0
             let sName = TypesFrom[e.String](buf, off)
             this.serverName = sName.val
             return sName.offset
@@ -244,7 +270,6 @@ export class Client {
         }
     }
     private afterConnect() {
-        this.connected = true
         this.conCallback(true, null, this.is2_0)
         while (this.lateCallbacks.length) {
             this.lateCallbacks.shift()()
@@ -279,6 +304,15 @@ export class Client {
         let type = getType(val)
         if (this.is2_0 && type === e.RawData) return new Error('2.0 does not have Raw Data')
         if (type === e.RPC) return new Error('Clients can not assign an RPC')
+        if (!this.connected) {
+            let nID = this.newKeyMap.length
+            this.newKeyMap[nID] = { typeID: type, val, flags: persist ? 1 : 0, name: name }
+            this.listeners.map(e => e(name, val, typeNames[type], "add", -nID - 1, persist ? 1 : 0))
+            return
+        }
+        if (name in this.keymap) {
+            return this.Update(this.keymap[name], val)
+        }
         let n = TypeBuf[e.String].toBuf(name),
             f = TypeBuf[type].toBuf(val),
             nlen = n.length,
@@ -301,16 +335,39 @@ export class Client {
      * @param id The ID of the Entry
      * @param val The value of the Entry
      */
-    Update(id: number, val: any) {
+    Update(id: number, val: any): Error {
+        if (id < 0) {
+            let nEntry = this.newKeyMap[-id - 1]
+            if (checkType(val, nEntry.typeID)) {
+                if (this.connected) {
+                    if (nEntry.name in this.keymap) {
+                        id = this.keymap[nEntry.name]
+                    }
+                    else {
+                        return this.Assign(val, nEntry.name, nEntry.flags > 0)
+                    }
+                }
+                else {
+                    nEntry.val = val
+                    this.listeners.map(e => e(nEntry.name, val, typeNames[nEntry.typeID], "update", id, nEntry.val))
+                    return
+                }
+            } else return new Error('Wrong Type')
+        }
         if (!(id in this.entries)) return new Error('ID not found')
         let entry = this.entries[id]
         if (!checkType(val, entry.typeID)) return new Error('Wrong Type')
         entry.val = val
+        entry.sn++
+        if (!this.connected) {
+            if (this.updatedIDs.indexOf(id) < 0) this.updatedIDs.push(id)
+            this.listeners.map(e => e(entry.name, val, typeNames[entry.typeID], "update", id, entry.flags))
+            return
+        }
         let f = TypeBuf[entry.typeID].toBuf(val),
             updateLen = this.is2_0 ? 5 : 6,
             len = f.length + updateLen,
             buf = Buffer.allocUnsafe(len)
-        entry.sn++
         buf[0] = 0x11
         buf[1] = id >> 8
         buf[2] = id & 0xff
@@ -319,6 +376,7 @@ export class Client {
         if (!this.is2_0) buf[5] = entry.typeID
         f.write(buf, updateLen)
         this.write(buf)
+        this.listeners.map(e => e(entry.name, val, typeNames[entry.typeID], "update", id, entry.flags))
     }
     /**
      * Updates the Flag of an Entry
@@ -453,11 +511,18 @@ const toServer = {
     hello2_0: Buffer.from([0x01, 2, 0])
 }
 export interface Entry {
-    typeID: number,
-    name: string,
-    sn: number,
-    flags: number,
+    typeID: number
+    name: string
+    sn: number
+    flags: number
     val?: any
+}
+interface newEntry {
+    typeID: number
+    name: string
+    val: any
+    flags: number
+    oldID?: number
 }
 const enum e {
     Boolean = 0x00,

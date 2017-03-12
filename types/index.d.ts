@@ -6,10 +6,14 @@ export declare class Client {
     private client;
     private connected;
     private entries;
+    private oldEntries;
     private keymap;
+    private newKeyMap;
+    private updatedIDs;
     private reconnect;
     private address;
     private port;
+    private known;
     private listeners;
     private RPCExecCallback;
     private lateCallbacks;

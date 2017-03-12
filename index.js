@@ -5,11 +5,15 @@ const net = require("net");
 var strLenIdent = numTo128;
 class Client {
     constructor() {
-        this.clientName = "node" + +new Date();
+        this.clientName = "NodeJS" + +new Date();
         this.connected = false;
         this.entries = {};
+        this.oldEntries = {};
         this.keymap = {};
+        this.newKeyMap = [];
+        this.updatedIDs = [];
         this.reconnect = false;
+        this.known = false;
         this.listeners = [];
         this.RPCExecCallback = {};
         this.lateCallbacks = [];
@@ -29,17 +33,37 @@ class Client {
             },
             /** Server Hello Complete */
             0x03: (buf, off) => {
+                this.connected = true;
+                for (let key in this.oldEntries) {
+                    if (!(key in this.entries)) {
+                        let old = this.oldEntries[key];
+                        this.Assign(old.val, old.name, old.flags > 0);
+                    }
+                }
                 if (this.is2_0) {
                     this.afterConnect();
                 }
                 else {
+                    this.newKeyMap.map(e => {
+                        if (!(e.name in this.keymap)) {
+                            this.Assign(e.val, e.name, e.flags > 0);
+                        }
+                    });
                     this.toServer.HelloComplete();
+                    if (this.known) {
+                        while (this.updatedIDs.length > 0) {
+                            let e = this.updatedIDs.pop();
+                            if (e in this.entries)
+                                this.Update(e, this.entries[e].val);
+                        }
+                    }
                 }
                 return off;
             },
             /** Server Hello */
             0x04: (buf, off) => {
-                let flags = buf[off++];
+                let flags = this.is2_0 ? 0 : buf[off++];
+                this.known = flags > 0;
                 let sName = TypesFrom[2 /* String */](buf, off);
                 this.serverName = sName.val;
                 return sName.offset;
@@ -198,11 +222,16 @@ class Client {
             this.client.on('data', data => {
                 this.read(data, 0);
             });
-        }).on('close', e => {
+        }).on('close', hadError => {
             this.connected = false;
+            this.oldEntries = this.entries;
+            this.entries = {};
+            this.keymap = {};
             if (this.reconnect) {
                 this.start(callback, address, port);
             }
+            else if (!hadError)
+                callback(false, null, this.is2_0);
         }).on('error', err => callback(false, err, this.is2_0));
     }
     /**
@@ -250,7 +279,6 @@ class Client {
         }
     }
     afterConnect() {
-        this.connected = true;
         this.conCallback(true, null, this.is2_0);
         while (this.lateCallbacks.length) {
             this.lateCallbacks.shift()();
@@ -268,6 +296,15 @@ class Client {
             return new Error('2.0 does not have Raw Data');
         if (type === 32 /* RPC */)
             return new Error('Clients can not assign an RPC');
+        if (!this.connected) {
+            let nID = this.newKeyMap.length;
+            this.newKeyMap[nID] = { typeID: type, val, flags: persist ? 1 : 0, name: name };
+            this.listeners.map(e => e(name, val, typeNames[type], "add", -nID - 1, persist ? 1 : 0));
+            return;
+        }
+        if (name in this.keymap) {
+            return this.Update(this.keymap[name], val);
+        }
         let n = TypeBuf[2 /* String */].toBuf(name), f = TypeBuf[type].toBuf(val), nlen = n.length, assignLen = this.is2_0 ? 6 : 7, len = f.length + nlen + assignLen, buf = Buffer.allocUnsafe(len);
         buf[0] = 0x10;
         n.write(buf, 1);
@@ -287,14 +324,40 @@ class Client {
      * @param val The value of the Entry
      */
     Update(id, val) {
+        if (id < 0) {
+            let nEntry = this.newKeyMap[-id - 1];
+            if (checkType(val, nEntry.typeID)) {
+                if (this.connected) {
+                    if (nEntry.name in this.keymap) {
+                        id = this.keymap[nEntry.name];
+                    }
+                    else {
+                        return this.Assign(val, nEntry.name, nEntry.flags > 0);
+                    }
+                }
+                else {
+                    nEntry.val = val;
+                    this.listeners.map(e => e(nEntry.name, val, typeNames[nEntry.typeID], "update", id, nEntry.val));
+                    return;
+                }
+            }
+            else
+                return new Error('Wrong Type');
+        }
         if (!(id in this.entries))
             return new Error('ID not found');
         let entry = this.entries[id];
         if (!checkType(val, entry.typeID))
             return new Error('Wrong Type');
         entry.val = val;
-        let f = TypeBuf[entry.typeID].toBuf(val), updateLen = this.is2_0 ? 5 : 6, len = f.length + updateLen, buf = Buffer.allocUnsafe(len);
         entry.sn++;
+        if (!this.connected) {
+            if (this.updatedIDs.indexOf(id) < 0)
+                this.updatedIDs.push(id);
+            this.listeners.map(e => e(entry.name, val, typeNames[entry.typeID], "update", id, entry.flags));
+            return;
+        }
+        let f = TypeBuf[entry.typeID].toBuf(val), updateLen = this.is2_0 ? 5 : 6, len = f.length + updateLen, buf = Buffer.allocUnsafe(len);
         buf[0] = 0x11;
         buf[1] = id >> 8;
         buf[2] = id & 0xff;
@@ -304,6 +367,7 @@ class Client {
             buf[5] = entry.typeID;
         f.write(buf, updateLen);
         this.write(buf);
+        this.listeners.map(e => e(entry.name, val, typeNames[entry.typeID], "update", id, entry.flags));
     }
     /**
      * Updates the Flag of an Entry
