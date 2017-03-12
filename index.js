@@ -76,7 +76,7 @@ class Client {
                     typeID: type,
                     name: keyName.val,
                     sn: (buf[off++] << 8) + buf[off++],
-                    flags: buf[off++]
+                    flags: this.is2_0 ? 0 : buf[off++]
                 };
                 let val = TypesFrom[entry.typeID](buf, off);
                 entry.val = val.val;
@@ -94,7 +94,7 @@ class Client {
             },
             /** Entry Update */
             0x11: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = buf[off++], val = TypesFrom[type](buf, off), typeName = typeNames[type], name = "";
+                let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = this.is2_0 ? this.entries[id].typeID : buf[off++], val = TypesFrom[type](buf, off), typeName = typeNames[type], name = "";
                 if (id in this.entries && type === this.entries[id].typeID) {
                     let entry = this.entries[id];
                     entry.sn = sn;
