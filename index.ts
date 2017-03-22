@@ -306,8 +306,8 @@ export class Client {
         if (type === e.RPC) return new Error('Clients can not assign an RPC')
         if (!this.connected) {
             let nID = this.newKeyMap.length
-            this.newKeyMap[nID] = { typeID: type, val, flags: persist ? 1 : 0, name: name }
-            this.listeners.map(e => e(name, val, typeNames[type], "add", -nID - 1, persist ? 1 : 0))
+            this.newKeyMap[nID] = { typeID: type, val, flags: +persist, name: name }
+            this.listeners.map(e => e(name, val, typeNames[type], "add", -nID - 1, +persist))
             return
         }
         if (name in this.keymap) {
@@ -326,7 +326,7 @@ export class Client {
         buf[nlen + 3] = 0xff
         buf[nlen + 4] = 0
         buf[nlen + 5] = 0
-        if (!this.is2_0) buf[nlen + 6] = persist ? 1 : 0
+        if (!this.is2_0) buf[nlen + 6] = +persist
         f.write(buf, nlen + assignLen)
         this.write(buf)
     }
@@ -386,7 +386,7 @@ export class Client {
     Flag(id: number, persist = false) {
         if (this.is2_0) return new Error('2.0 does not support flags')
         if (!(id in this.entries)) return new Error('Does not exist')
-        this.write(Buffer.from([0x12, id >> 8, id & 0xff, persist ? 1 : 0]))
+        this.write(Buffer.from([0x12, id >> 8, id & 0xff, +persist]))
     }
     /**
      * Deletes an Entry
@@ -583,7 +583,7 @@ const TypeBuf: fromBuf = {
             return {
                 length: 1,
                 write: (buf, off) => {
-                    buf[off] = val ? 1 : 0
+                    buf[off] = +val
                 }
             }
         },
@@ -652,7 +652,7 @@ const TypeBuf: fromBuf = {
                 write: (buf, off) => {
                     buf[off] = val.length
                     for (let i = 0; i < val.length; i++) {
-                        buf[off + i] = val[i] ? 1 : 0
+                        buf[off + i] = +val[i]
                     }
                 }
             }
