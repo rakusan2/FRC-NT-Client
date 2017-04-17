@@ -5,7 +5,7 @@ const net = require("net");
 var strLenIdent = numTo128;
 class Client {
     constructor() {
-        this.clientName = "NodeJS" + +new Date();
+        this.clientName = "NodeJS" + Date.now();
         this.connected = false;
         this.entries = {};
         this.oldEntries = {};
