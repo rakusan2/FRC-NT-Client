@@ -460,7 +460,7 @@ export class Client {
     write(buf: Buffer, immediate = false) {
         if (this.aliveTimer) clearTimeout(this.aliveTimer)
         this.aliveTimer = setTimeout(() => { this.write(this.keepAlive) }, 1000);
-        if ('unref' in this.aliveTimer) this.aliveTimer.unref()
+        if (this.aliveTimer.unref) this.aliveTimer.unref()
         if (immediate) this.client.write(buf)
         else {
             this.buffersToSend.push(buf)
