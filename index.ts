@@ -4,7 +4,7 @@ var strLenIdent = numTo128
 export type Listener = (key: string, value: any, valueType: String, type: "add" | "delete" | "update" | "flagChange", id: number, flags: number) => any
 export class Client {
     serverName: String
-    clientName = "NodeJS" + +new Date()
+    clientName = "NodeJS" + Date.now()
     private client: net.Socket
     private connected = false
     private entries: { [key: number]: Entry } = {}
