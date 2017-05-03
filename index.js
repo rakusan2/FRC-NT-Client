@@ -449,7 +449,8 @@ class Client {
         if (this.aliveTimer)
             clearTimeout(this.aliveTimer);
         this.aliveTimer = setTimeout(() => { this.write(this.keepAlive); }, 1000);
-        this.aliveTimer.unref();
+        if ('unref' in this.aliveTimer)
+            this.aliveTimer.unref();
         if (immediate)
             this.client.write(buf);
         else {
