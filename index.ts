@@ -21,6 +21,7 @@ export class Client {
     private lateCallbacks: (() => any)[] = []
     private conCallback: (connected: boolean, err: Error, is2_0: boolean) => any
     private is2_0 = false
+    private reAssign: { [key: string]: { val: any, flags: number } } = {}
     /**
      * True if the Client has completed its hello and is connected
      */
@@ -44,6 +45,7 @@ export class Client {
         this.address = address
         this.port = port
         this.conCallback = callback
+        this.reAssign = {}
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName)
             this.client.on('data', data => {
@@ -155,9 +157,10 @@ export class Client {
             let type = buf[off++],
                 id = (buf[off++] << 8) + buf[off++],
                 typeName = typeNames[type],
+                key = keyName.val,
                 entry: Entry = {
                     typeID: type,
-                    name: keyName.val,
+                    name: key,
                     sn: (buf[off++] << 8) + buf[off++],
                     flags: this.is2_0 ? 0 : buf[off++]
                 }
@@ -165,6 +168,14 @@ export class Client {
             entry.val = val.val
             this.entries[id] = entry
             this.keymap[val.val] = id
+            if (key in this.reAssign) {
+                let toUpdate = this.reAssign[key]
+                this.Update(id, toUpdate.val)
+                if (this.is2_0 && entry.flags !== toUpdate.flags) {
+                    this.Flag(id, toUpdate.flags)
+                }
+                delete this.reAssign[key]
+            }
             for (let i = 0; i < this.listeners.length; i++) {
                 if (this.connected) {
                     this.listeners[i](keyName.val, val.val, typeName, "add", id, entry.flags)
@@ -313,6 +324,14 @@ export class Client {
         if (name in this.keymap) {
             return this.Update(this.keymap[name], val)
         }
+        if (name in this.reAssign) {
+            let a = this.reAssign[name]
+            a.val = val
+            a.flags = +persist
+            return
+        } else {
+            this.reAssign[name] = { val, flags: +persist }
+        }
         let n = TypeBuf[e.String].toBuf(name),
             f = TypeBuf[type].toBuf(val),
             nlen = n.length,
@@ -381,12 +400,12 @@ export class Client {
     /**
      * Updates the Flag of an Entry
      * @param id The ID of the Entry
-     * @param persist Whether the Entry should persist through a restart on the server
+     * @param flags Whether the Entry should persist through a restart on the server
      */
-    Flag(id: number, persist = false) {
+    Flag(id: number, flags:boolean|number = false) {
         if (this.is2_0) return new Error('2.0 does not support flags')
         if (!(id in this.entries)) return new Error('Does not exist')
-        this.write(Buffer.from([0x12, id >> 8, id & 0xff, +persist]))
+        this.write(Buffer.from([0x12, id >> 8, id & 0xff, +flags]))
     }
     /**
      * Deletes an Entry

@@ -19,6 +19,7 @@ export declare class Client {
     private lateCallbacks;
     private conCallback;
     private is2_0;
+    private reAssign;
     /**
      * True if the Client has completed its hello and is connected
      */
@@ -81,9 +82,9 @@ export declare class Client {
     /**
      * Updates the Flag of an Entry
      * @param id The ID of the Entry
-     * @param persist Whether the Entry should persist through a restart on the server
+     * @param flags Whether the Entry should persist through a restart on the server
      */
-    Flag(id: number, persist?: boolean): Error;
+    Flag(id: number, flags?: boolean | number): Error;
     /**
      * Deletes an Entry
      * @param id The ID of the Entry
