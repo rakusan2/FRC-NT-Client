@@ -20,6 +20,7 @@ export declare class Client {
     private conCallback;
     private is2_0;
     private reAssign;
+    private beingAssigned;
     /**
      * True if the Client has completed its hello and is connected
      */
@@ -44,9 +45,10 @@ export declare class Client {
      * Get the unique ID of a key or the IDs of all keys if called empty
      * @param key name of the key
      */
-    getKeyID(key?: string): number | {
+    getKeyID(): {
         [key: string]: number;
     };
+    getKeyID(key: string): number;
     /**
      * Gets an Entry
      * @param id ID of an Entry
@@ -72,7 +74,7 @@ export declare class Client {
      * @param name The Key of the Entry
      * @param persist Whether the Value should persist on the server through a restart
      */
-    Assign(val: any, name: string, persist?: boolean): Error;
+    Assign(val: any, name: string, persist?: boolean | number): Error;
     /**
      * Updates an Entry
      * @param id The ID of the Entry

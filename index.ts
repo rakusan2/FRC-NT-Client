@@ -22,6 +22,7 @@ export class Client {
     private conCallback: (connected: boolean, err: Error, is2_0: boolean) => any
     private is2_0 = false
     private reAssign: { [key: string]: { val: any, flags: number } } = {}
+    private beingAssigned:string[]=[]
     /**
      * True if the Client has completed its hello and is connected
      */
@@ -46,6 +47,7 @@ export class Client {
         this.port = port
         this.conCallback = callback
         this.reAssign = {}
+        this.beingAssigned =[]
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName)
             this.client.on('data', data => {
@@ -72,6 +74,8 @@ export class Client {
      * Get the unique ID of a key or the IDs of all keys if called empty
      * @param key name of the key
      */
+    getKeyID(): { [key: string]: number }
+    getKeyID(key: string): number
     getKeyID(key?: string) {
         if (key == undefined) {
             return this.keymap
@@ -167,15 +171,7 @@ export class Client {
             let val = TypesFrom[entry.typeID](buf, off)
             entry.val = val.val
             this.entries[id] = entry
-            this.keymap[val.val] = id
-            if (key in this.reAssign) {
-                let toUpdate = this.reAssign[key]
-                this.Update(id, toUpdate.val)
-                if (this.is2_0 && entry.flags !== toUpdate.flags) {
-                    this.Flag(id, toUpdate.flags)
-                }
-                delete this.reAssign[key]
-            }
+            this.keymap[key] = id
             for (let i = 0; i < this.listeners.length; i++) {
                 if (this.connected) {
                     this.listeners[i](keyName.val, val.val, typeName, "add", id, entry.flags)
@@ -183,6 +179,14 @@ export class Client {
                 else {
                     this.lateCallbacks.push(() => this.listeners[i](keyName.val, val.val, typeName, "add", id, entry.flags))
                 }
+            }
+            if (key in this.reAssign) {
+                let toUpdate = this.reAssign[key]
+                this.Update(id, toUpdate.val)
+                if (!this.is2_0 && entry.flags !== toUpdate.flags) {
+                    this.Flag(id, toUpdate.flags)
+                }
+                delete this.reAssign[key]
             }
             return val.offset
         },
@@ -311,7 +315,7 @@ export class Client {
      * @param name The Key of the Entry
      * @param persist Whether the Value should persist on the server through a restart
      */
-    Assign(val: any, name: string, persist = false) {
+    Assign(val: any, name: string, persist: boolean | number = false) {
         let type = getType(val)
         if (this.is2_0 && type === e.RawData) return new Error('2.0 does not have Raw Data')
         if (type === e.RPC) return new Error('Clients can not assign an RPC')
@@ -324,13 +328,11 @@ export class Client {
         if (name in this.keymap) {
             return this.Update(this.keymap[name], val)
         }
-        if (name in this.reAssign) {
-            let a = this.reAssign[name]
-            a.val = val
-            a.flags = +persist
+        if (this.beingAssigned.indexOf(name)>=0) {
+            this.reAssign[name] = { val, flags: +persist }
             return
         } else {
-            this.reAssign[name] = { val, flags: +persist }
+            this.beingAssigned.push(name)
         }
         let n = TypeBuf[e.String].toBuf(name),
             f = TypeBuf[type].toBuf(val),
@@ -402,7 +404,7 @@ export class Client {
      * @param id The ID of the Entry
      * @param flags Whether the Entry should persist through a restart on the server
      */
-    Flag(id: number, flags:boolean|number = false) {
+    Flag(id: number, flags: boolean | number = false) {
         if (this.is2_0) return new Error('2.0 does not support flags')
         if (!(id in this.entries)) return new Error('Does not exist')
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, +flags]))
@@ -483,7 +485,10 @@ export class Client {
         if (immediate) this.client.write(buf)
         else {
             this.buffersToSend.push(buf)
-            if (!this.bufferTimer) this.bufferTimer = setTimeout(() => this.client.write(Buffer.concat(this.buffersToSend)), 20)
+            if (!this.bufferTimer) this.bufferTimer = setTimeout(() => {
+                this.client.write(Buffer.concat(this.buffersToSend))
+                this.bufferTimer=null
+            }, 20)
         }
     }
 }

@@ -19,6 +19,7 @@ class Client {
         this.lateCallbacks = [];
         this.is2_0 = false;
         this.reAssign = {};
+        this.beingAssigned = [];
         this.recProto = {
             /** Protocol Version Unsupported */
             0x02: (buf, off) => {
@@ -82,15 +83,7 @@ class Client {
                 let val = TypesFrom[entry.typeID](buf, off);
                 entry.val = val.val;
                 this.entries[id] = entry;
-                this.keymap[val.val] = id;
-                if (key in this.reAssign) {
-                    let toUpdate = this.reAssign[key];
-                    this.Update(id, toUpdate.val);
-                    if (this.is2_0 && entry.flags !== toUpdate.flags) {
-                        this.Flag(id, toUpdate.flags);
-                    }
-                    delete this.reAssign[key];
-                }
+                this.keymap[key] = id;
                 for (let i = 0; i < this.listeners.length; i++) {
                     if (this.connected) {
                         this.listeners[i](keyName.val, val.val, typeName, "add", id, entry.flags);
@@ -98,6 +91,14 @@ class Client {
                     else {
                         this.lateCallbacks.push(() => this.listeners[i](keyName.val, val.val, typeName, "add", id, entry.flags));
                     }
+                }
+                if (key in this.reAssign) {
+                    let toUpdate = this.reAssign[key];
+                    this.Update(id, toUpdate.val);
+                    if (!this.is2_0 && entry.flags !== toUpdate.flags) {
+                        this.Flag(id, toUpdate.flags);
+                    }
+                    delete this.reAssign[key];
                 }
                 return val.offset;
             },
@@ -227,6 +228,7 @@ class Client {
         this.port = port;
         this.conCallback = callback;
         this.reAssign = {};
+        this.beingAssigned = [];
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName);
             this.client.on('data', data => {
@@ -251,10 +253,6 @@ class Client {
     addListener(callback) {
         this.listeners.push(callback);
     }
-    /**
-     * Get the unique ID of a key or the IDs of all keys if called empty
-     * @param key name of the key
-     */
     getKeyID(key) {
         if (key == undefined) {
             return this.keymap;
@@ -315,14 +313,12 @@ class Client {
         if (name in this.keymap) {
             return this.Update(this.keymap[name], val);
         }
-        if (name in this.reAssign) {
-            let a = this.reAssign[name];
-            a.val = val;
-            a.flags = +persist;
+        if (this.beingAssigned.indexOf(name) >= 0) {
+            this.reAssign[name] = { val, flags: +persist };
             return;
         }
         else {
-            this.reAssign[name] = { val, flags: +persist };
+            this.beingAssigned.push(name);
         }
         let n = TypeBuf[2 /* String */].toBuf(name), f = TypeBuf[type].toBuf(val), nlen = n.length, assignLen = this.is2_0 ? 6 : 7, len = f.length + nlen + assignLen, buf = Buffer.allocUnsafe(len);
         buf[0] = 0x10;
@@ -475,7 +471,10 @@ class Client {
         else {
             this.buffersToSend.push(buf);
             if (!this.bufferTimer)
-                this.bufferTimer = setTimeout(() => this.client.write(Buffer.concat(this.buffersToSend)), 20);
+                this.bufferTimer = setTimeout(() => {
+                    this.client.write(Buffer.concat(this.buffersToSend));
+                    this.bufferTimer = null;
+                }, 20);
         }
     }
 }
