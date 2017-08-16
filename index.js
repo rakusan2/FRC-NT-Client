@@ -247,11 +247,22 @@ class Client {
         }).on('error', err => callback(false, err, this.is2_0));
     }
     /**
-     * Add a Listener to be called on change of an Entry
+     * Adds and returns a Listener to be called on change of an Entry
      * @param callback Listener
      */
     addListener(callback) {
         this.listeners.push(callback);
+        return callback;
+    }
+    /**
+     * Removes a Listener
+     * @param listener the Listener to remove
+     */
+    removeListener(listener) {
+        var index = this.listeners.indexOf(listener);
+        if (index > -1) {
+            this.listeners.splice(index, 1);
+        }
     }
     getKeyID(key) {
         if (key == undefined) {
