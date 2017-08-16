@@ -37,10 +37,15 @@ export declare class Client {
      */
     start(callback?: (connected: boolean, err: Error, is2_0: boolean) => any, address?: string, port?: number): void;
     /**
-     * Add a Listener to be called on change of an Entry
+     * Adds and returns a Listener to be called on change of an Entry
      * @param callback Listener
      */
-    addListener(callback: Listener): void;
+    addListener(callback: Listener): Listener;
+    /**
+     * Removes a Listener
+     * @param listener the Listener to remove
+     */
+    removeListener(listener: Listener): void;
     /**
      * Get the unique ID of a key or the IDs of all keys if called empty
      * @param key name of the key
