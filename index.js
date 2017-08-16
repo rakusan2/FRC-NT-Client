@@ -251,7 +251,7 @@ class Client {
      * @param callback Listener
      */
     addListener(callback) {
-        return this.listeners.push(callback);
+        return this.listeners.push(callback) - 1;
     }
     /**
      * Removes a Listener
