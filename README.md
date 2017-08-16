@@ -33,16 +33,16 @@ ntClient.addListener((key, val, type, id) => {
     - **address** - The address of the Server. Defaults to loopback
     - **port** - The port of the server
 - `.addListener((key, value, valueType, type, id, flags) => any)`
-    - Adds a callback to be called when a value has been added, updated, or deleted, and returns an id
+    - Adds a callback to be called when a value has been added, updated, or deleted, and returns the Listener
     - **key** - The Key for the Entry
     - **value** - The value associated with the key
     - **valueType** - The type of the value Possible Types are listed Bellow
     - **type** - The type of the callback. Possible Types are: "add", "update", "delete", "flagChange"
     - **id** - The ID of the Entry
     - **flags** - The flags of the Entry
-- `.removeListener(id)`
-    - Adds a callback to be called when a value has been added, updated, or deleted
-    - **id** - The id of the Listener to remove
+- `.removeListener(listener)`
+    - Removes the specified listener
+    - **listener** - The Listener returned from `.addListener()`
 - `.isConnected()`
     - Returns true if the client is connected and has completed its handshake
 - `.uses2_0()`
