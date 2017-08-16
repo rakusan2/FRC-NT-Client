@@ -258,7 +258,7 @@ class Client {
      * @param id the Listener's id, returned from `addListener`
      */
     removeListener(id) {
-        delete this.listeners[id]
+        delete this.listeners[id];
     }
     getKeyID(key) {
         if (key == undefined) {
