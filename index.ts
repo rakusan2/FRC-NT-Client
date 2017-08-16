@@ -64,11 +64,18 @@ export class Client {
         }).on('error', err => callback(false, err, this.is2_0))
     }
     /**
-     * Add a Listener to be called on change of an Entry
+     * Add a Listener to be called on change of an Entry, and returns its id
      * @param callback Listener
      */
     addListener(callback: Listener) {
-        this.listeners.push(callback)
+        return this.listeners.push(callback)
+    }
+    /**
+     * Removes a Listener
+     * @param id the Listener's id, returned from `addListener`
+     */
+    removeListener(id: number) {
+        delete this.listeners[id]
     }
     /**
      * Get the unique ID of a key or the IDs of all keys if called empty

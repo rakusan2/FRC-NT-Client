@@ -251,7 +251,14 @@ class Client {
      * @param callback Listener
      */
     addListener(callback) {
-        this.listeners.push(callback);
+        return this.listeners.push(callback);
+    }
+    /**
+     * Removes a Listener
+     * @param id the Listener's id, returned from `addListener`
+     */
+    removeListener(id) {
+        delete this.listeners[id]
     }
     getKeyID(key) {
         if (key == undefined) {
