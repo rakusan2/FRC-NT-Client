@@ -21,6 +21,7 @@ export declare class Client {
     private is2_0;
     private reAssign;
     private beingAssigned;
+    private continuation;
     /**
      * True if the Client has completed its hello and is connected
      */
@@ -126,4 +127,13 @@ export interface Entry {
     sn: number;
     flags: number;
     val?: any;
+}
+/**
+ * Error thrown when buffer is too short
+ */
+export declare class LengthError extends Error {
+    buf: Buffer;
+    position: number;
+    constructor(buf: Buffer, possition: number, length: number);
+    constructor(mesg: string);
 }

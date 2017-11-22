@@ -23,6 +23,7 @@ class Client {
         this.recProto = {
             /** Protocol Version Unsupported */
             0x02: (buf, off) => {
+                checkBufLen(buf, off, 2);
                 var ver = `${buf[off++]}.${buf[off++]}`;
                 if (ver === '2.0') {
                     this.reconnect = true;
@@ -64,6 +65,7 @@ class Client {
             },
             /** Server Hello */
             0x04: (buf, off) => {
+                checkBufLen(buf, off, 1);
                 let flags = this.is2_0 ? 0 : buf[off++];
                 this.known = flags > 0;
                 let sName = TypesFrom[2 /* String */](buf, off);
@@ -74,6 +76,7 @@ class Client {
             0x10: (buf, off) => {
                 let keyName = TypesFrom[2 /* String */](buf, off);
                 off = keyName.offset;
+                checkBufLen(buf, off, 5 + (this.is2_0 ? 0 : 1));
                 let type = buf[off++], id = (buf[off++] << 8) + buf[off++], typeName = typeNames[type], key = keyName.val, entry = {
                     typeID: type,
                     name: key,
@@ -104,6 +107,7 @@ class Client {
             },
             /** Entry Update */
             0x11: (buf, off) => {
+                checkBufLen(buf, off, 4 + (this.is2_0 ? 0 : 1));
                 let id = (buf[off++] << 8) + buf[off++], sn = (buf[off++] << 8) + buf[off++], type = this.is2_0 ? this.entries[id].typeID : buf[off++], val = TypesFrom[type](buf, off), typeName = typeNames[type], name = "";
                 if (id in this.entries && type === this.entries[id].typeID) {
                     let entry = this.entries[id];
@@ -123,6 +127,7 @@ class Client {
             },
             /** Entry Flags Update */
             0x12: (buf, off) => {
+                checkBufLen(buf, off, 3);
                 let id = (buf[off++] << 8) + buf[off++], flags = buf[off++];
                 if (id in this.entries) {
                     let entry = this.entries[id];
@@ -140,6 +145,7 @@ class Client {
             },
             /** Entry Delete */
             0x13: (buf, off) => {
+                checkBufLen(buf, off, 2);
                 let id = (buf[off++] << 8) + buf[off++], name = this.entries[id].name, typename = typeNames[this.entries[id].typeID], flags = this.entries[id].flags;
                 delete this.entries[id];
                 delete this.keymap[name];
@@ -155,6 +161,7 @@ class Client {
             },
             /** Clear All Entries */
             0x14: (buf, off) => {
+                checkBufLen(buf, off, 4);
                 let val = 0;
                 for (let i = 0; i < 4; i++) {
                     val = (val << 8) + buf[off + i];
@@ -167,7 +174,8 @@ class Client {
             },
             /** RPC Response */
             0x21: (buf, off) => {
-                let id = (buf[off++] << 8) + buf[off++], executeID = (buf[off++] << 8) + buf[off++], len = fromLEBuf(buf, off), res = this.entries[id].val.results, results = {}, s;
+                checkBufLen(buf, off, 4);
+                let id = (buf[off++] << 8) + buf[off++], executeID = (buf[off++] << 8) + buf[off++], len = numFrom128(buf, off), res = this.entries[id].val.results, results = {}, s;
                 for (let i = 0; i < res.length; i++) {
                     for (let i = 0; i < res.length; i++) {
                         s = TypesFrom[res[i].typeId](buf, off);
@@ -232,7 +240,18 @@ class Client {
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName);
             this.client.on('data', data => {
-                this.read(data, 0);
+                let pos = 0, buf = data;
+                if (this.continuation != null) {
+                    pos = this.continuation.offset;
+                    buf = Buffer.concat([this.continuation.buf, buf]);
+                    this.continuation = null;
+                }
+                try {
+                    this.read(buf, pos);
+                }
+                catch (e) {
+                    this.conCallback(true, e, this.is2_0);
+                }
             });
         }).on('close', hadError => {
             this.connected = false;
@@ -291,11 +310,25 @@ class Client {
         return this.entries;
     }
     read(buf, off) {
+        checkBufLen(buf, off, 1);
+        if (buf.length == off)
+            return;
         if (buf[off] in this.recProto) {
-            off = this.recProto[buf[off]](buf, off + 1);
-            if (buf.length > off)
+            try {
+                off = this.recProto[buf[off]](buf, off + 1);
                 this.read(buf, off);
+            }
+            catch (e) {
+                if (e instanceof LengthError) {
+                    this.continuation = { buf, offset: off };
+                    return;
+                }
+                else
+                    throw e;
+            }
         }
+        else
+            throw new Error("Unknown Message Type");
     }
     afterConnect() {
         this.conCallback(true, null, this.is2_0);
@@ -562,6 +595,7 @@ const TypeBuf = {
             };
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1);
             return {
                 offset: off + 1,
                 val: buf[off] > 0
@@ -578,6 +612,7 @@ const TypeBuf = {
             };
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 8);
             return {
                 offset: off + 8,
                 val: ieee754.read(buf, off, false, 52, 8)
@@ -610,10 +645,11 @@ const TypeBuf = {
             };
         },
         fromBuf: (buf, off) => {
-            let { val, offset } = numFrom128(buf, off), nbuf = Buffer.allocUnsafe(val);
+            let { val, offset } = numFrom128(buf, off), nbuf = Buffer.allocUnsafe(val), end = offset + val;
+            checkBufLen(buf, off, val);
             buf.copy(nbuf, 0, offset);
             return {
-                offset: offset + nbuf.length,
+                offset: end,
                 val: nbuf
             };
         }
@@ -631,8 +667,10 @@ const TypeBuf = {
             };
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1);
             let len = buf[off], res = [];
             off++;
+            checkBufLen(buf, off, len);
             for (let i = 0; i < len; i++) {
                 res.push(buf[off + i] > 0);
             }
@@ -657,8 +695,10 @@ const TypeBuf = {
             };
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1);
             let val = buf[off], num = [];
             off++;
+            checkBufLen(buf, off, 8 * val);
             for (let i = 0; i < val; i++) {
                 num.push(ieee754.read(buf, off + i * 8, false, 52, 8));
             }
@@ -688,6 +728,7 @@ const TypeBuf = {
             };
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1);
             let len = buf[off], s = [], st;
             off++;
             for (let i = 0; i < len; i++) {
@@ -703,17 +744,19 @@ const TypeBuf = {
     },
     0x20: {
         fromBuf: (buf, off) => {
-            let len = buf[off], st;
-            off++;
+            checkBufLen(buf, off, 1);
+            let st;
             if (buf[off] !== 1)
-                return;
+                throw new Error('Unsupported RPC Definition');
             off++;
             st = fromLEBuf(buf, off);
             off = st.offset;
+            checkBufLen(buf, off, 1);
             let name = st.val, parNum = buf[off], par = [], results = [], s = { offset: 0, val: "" }, resNum = 0;
             off++;
             for (let i = 0; i < parNum; i++) {
                 let lastPar = { typeId: 0, typeName: "", name: "", default: 0 };
+                checkBufLen(buf, off, 1);
                 lastPar.typeId = buf[off];
                 lastPar.typeName = typeNames[lastPar.typeId];
                 s = fromLEBuf(buf, off);
@@ -724,9 +767,11 @@ const TypeBuf = {
                 off = t.offset;
                 par.push(lastPar);
             }
+            checkBufLen(buf, off, 1);
             resNum = buf[off++];
             for (let i = 0; i < resNum; i++) {
                 let res = { typeId: 0, typeName: "", name: "" };
+                checkBufLen(buf, off, 1);
                 res.typeId = buf[off];
                 res.typeName = typeNames[res.typeId];
                 s = fromLEBuf(buf, off + 1);
@@ -755,8 +800,15 @@ var TypesFrom = {
     0x12: TypeBuf[18 /* StringArray */].fromBuf,
     0x20: TypeBuf[32 /* RPC */].fromBuf,
 };
+/**
+ * Decodes String where first bytes are length encoded using LEB128
+ * @param buf Buffer to red from
+ * @param offset position to start reading from
+ * @throws LengthError
+ */
 function fromLEBuf(buf, offset) {
     let res = numFrom128(buf, offset), end = res.offset + res.val;
+    checkBufLen(buf, res.offset, res.val);
     return { offset: end, val: buf.slice(res.offset, end).toString('utf8') };
 }
 function numTo128(num) {
@@ -772,11 +824,18 @@ function numTo128(num) {
 function numTo2Byte(num) {
     return Buffer.from([(this >> 8) & 0xff, this & 0xff]);
 }
+/**
+ * Decodes a number encoded in LEB128
+ * @param buf Buffer to red from
+ * @param offset position to start reading from
+ * @throws LengthError
+ */
 function numFrom128(buf, offset) {
     let r = 0, n = buf[offset];
     offset++;
     r = n & 0x7f;
     while (n > 0x7f) {
+        checkBufLen(buf, offset, 1);
         n = buf[offset];
         r = (r << 7) + (n & 0x7f);
         offset++;
@@ -785,4 +844,30 @@ function numFrom128(buf, offset) {
         val: r,
         offset
     };
+}
+/**
+ * Error thrown when buffer is too short
+ */
+class LengthError extends Error {
+    constructor(mesg, pos = 0, length = 1) {
+        if (typeof mesg !== "string") {
+            super(`Trying to read ${length} bytes from position ${pos} of a buffer that is ${mesg.length} long`);
+            this.buf = mesg;
+            this.position = pos;
+        }
+        else
+            super(mesg);
+    }
+}
+exports.LengthError = LengthError;
+/**
+ * Check if the Buffer is long enought
+ * @param buf Buffer to check the length of
+ * @param start Position to read from
+ * @param length Number of bytes that will be read
+ * @throws LengthError
+ */
+function checkBufLen(buf, start, length) {
+    if (buf.length < start + length - 1)
+        throw new LengthError(buf, start, length);
 }

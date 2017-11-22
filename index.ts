@@ -22,7 +22,8 @@ export class Client {
     private conCallback: (connected: boolean, err: Error, is2_0: boolean) => any
     private is2_0 = false
     private reAssign: { [key: string]: { val: any, flags: number } } = {}
-    private beingAssigned:string[]=[]
+    private beingAssigned: string[] = []
+    private continuation: { buf: Buffer, offset: number }
     /**
      * True if the Client has completed its hello and is connected
      */
@@ -47,11 +48,21 @@ export class Client {
         this.port = port
         this.conCallback = callback
         this.reAssign = {}
-        this.beingAssigned =[]
+        this.beingAssigned = []
         this.client = net.connect(port, address, () => {
             this.toServer.Hello(this.clientName)
             this.client.on('data', data => {
-                this.read(data, 0)
+                let pos = 0,
+                    buf = data
+                if (this.continuation != null) {
+                    pos = this.continuation.offset
+                    buf = Buffer.concat([this.continuation.buf, buf])
+                    this.continuation = null
+                } try {
+                    this.read(buf, pos)
+                } catch (e) {
+                    this.conCallback(true, e, this.is2_0)
+                }
             })
         }).on('close', hadError => {
             this.connected = false
@@ -113,14 +124,26 @@ export class Client {
         return this.entries
     }
     private read(buf: Buffer, off: number) {
+        checkBufLen(buf, off, 1)
+        if (buf.length == off) return
         if (buf[off] in this.recProto) {
-            off = this.recProto[buf[off]](buf, off + 1)
-            if (buf.length > off) this.read(buf, off)
+            try {
+                off = this.recProto[buf[off]](buf, off + 1)
+                this.read(buf, off)
+            }
+            catch (e) {
+                if (e instanceof LengthError) {
+                    this.continuation = { buf, offset: off }
+                    return
+                } else throw e
+            }
         }
+        else throw new Error("Unknown Message Type")
     }
     private readonly recProto: { [key: number]: (buf: Buffer, offset: number) => number } = {
         /** Protocol Version Unsupported */
         0x02: (buf, off) => {
+            checkBufLen(buf, off, 2)
             var ver = `${buf[off++]}.${buf[off++]}`
             if (ver === '2.0') {
                 this.reconnect = true
@@ -159,6 +182,7 @@ export class Client {
         },
         /** Server Hello */
         0x04: (buf, off) => {
+            checkBufLen(buf, off, 1)
             let flags = this.is2_0 ? 0 : buf[off++]
             this.known = flags > 0
             let sName = TypesFrom[e.String](buf, off)
@@ -169,6 +193,7 @@ export class Client {
         0x10: (buf, off) => {
             let keyName = TypesFrom[e.String](buf, off)
             off = keyName.offset
+            checkBufLen(buf, off, 5 + (this.is2_0 ? 0 : 1))
             let type = buf[off++],
                 id = (buf[off++] << 8) + buf[off++],
                 typeName = typeNames[type],
@@ -203,6 +228,7 @@ export class Client {
         },
         /** Entry Update */
         0x11: (buf, off) => {
+            checkBufLen(buf, off, 4 + (this.is2_0 ? 0 : 1))
             let id = (buf[off++] << 8) + buf[off++],
                 sn = (buf[off++] << 8) + buf[off++],
                 type = this.is2_0 ? this.entries[id].typeID : buf[off++],
@@ -227,6 +253,7 @@ export class Client {
         },
         /** Entry Flags Update */
         0x12: (buf, off) => {
+            checkBufLen(buf, off, 3)
             let id = (buf[off++] << 8) + buf[off++],
                 flags = buf[off++]
             if (id in this.entries) {
@@ -245,6 +272,7 @@ export class Client {
         },
         /** Entry Delete */
         0x13: (buf, off) => {
+            checkBufLen(buf, off, 2)
             let id = (buf[off++] << 8) + buf[off++],
                 name = this.entries[id].name,
                 typename = typeNames[this.entries[id].typeID],
@@ -263,6 +291,7 @@ export class Client {
         },
         /** Clear All Entries */
         0x14: (buf, off) => {
+            checkBufLen(buf, off, 4)
             let val = 0
             for (let i = 0; i < 4; i++) {
                 val = (val << 8) + buf[off + i]
@@ -275,9 +304,10 @@ export class Client {
         },
         /** RPC Response */
         0x21: (buf, off) => {
+            checkBufLen(buf, off, 4)
             let id = (buf[off++] << 8) + buf[off++],
                 executeID = (buf[off++] << 8) + buf[off++],
-                len = fromLEBuf(buf, off),
+                len = numFrom128(buf, off),
                 res = (<RPC>this.entries[id].val).results,
                 results = {},
                 s: { val: any, offset: number }
@@ -339,7 +369,7 @@ export class Client {
         if (name in this.keymap) {
             return this.Update(this.keymap[name], val)
         }
-        if (this.beingAssigned.indexOf(name)>=0) {
+        if (this.beingAssigned.indexOf(name) >= 0) {
             this.reAssign[name] = { val, flags: +persist }
             return
         } else {
@@ -498,7 +528,7 @@ export class Client {
             this.buffersToSend.push(buf)
             if (!this.bufferTimer) this.bufferTimer = setTimeout(() => {
                 this.client.write(Buffer.concat(this.buffersToSend))
-                this.bufferTimer=null
+                this.bufferTimer = null
             }, 20)
         }
     }
@@ -623,6 +653,7 @@ const TypeBuf: fromBuf = {
             }
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1)
             return {
                 offset: off + 1,
                 val: buf[off] > 0
@@ -639,6 +670,7 @@ const TypeBuf: fromBuf = {
             }
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 8)
             return {
                 offset: off + 8,
                 val: ieee754.read(buf, off, false, 52, 8)
@@ -672,10 +704,12 @@ const TypeBuf: fromBuf = {
         },
         fromBuf: (buf, off) => {
             let { val, offset } = numFrom128(buf, off),
-                nbuf = Buffer.allocUnsafe(val)
+                nbuf = Buffer.allocUnsafe(val),
+                end = offset + val
+            checkBufLen(buf, off, val)
             buf.copy(nbuf, 0, offset)
             return {
-                offset: offset + nbuf.length,
+                offset: end,
                 val: nbuf
             }
         }
@@ -693,9 +727,11 @@ const TypeBuf: fromBuf = {
             }
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1)
             let len = buf[off],
                 res: boolean[] = []
             off++
+            checkBufLen(buf, off, len)
             for (let i = 0; i < len; i++) {
                 res.push(buf[off + i] > 0)
             }
@@ -720,9 +756,11 @@ const TypeBuf: fromBuf = {
             }
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1)
             let val = buf[off],
                 num: number[] = []
             off++
+            checkBufLen(buf, off, 8 * val)
             for (let i = 0; i < val; i++) {
                 num.push(ieee754.read(buf, off + i * 8, false, 52, 8))
             }
@@ -753,6 +791,7 @@ const TypeBuf: fromBuf = {
             }
         },
         fromBuf: (buf, off) => {
+            checkBufLen(buf, off, 1)
             let len = buf[off],
                 s: string[] = [],
                 st: { offset: number, val: string }
@@ -770,12 +809,13 @@ const TypeBuf: fromBuf = {
     },
     0x20: <f<RPC>>{
         fromBuf: (buf, off) => {
-            let len = buf[off], st: { val: string, offset: number }
-            off++
-            if (buf[off] !== 1) return
+            checkBufLen(buf, off, 1)
+            let st: { val: string, offset: number }
+            if (buf[off] !== 1) throw new Error('Unsupported RPC Definition')
             off++
             st = fromLEBuf(buf, off)
             off = st.offset
+            checkBufLen(buf, off, 1)
             let name = st.val,
                 parNum = buf[off],
                 par: RPCPar[] = [],
@@ -785,6 +825,7 @@ const TypeBuf: fromBuf = {
             off++
             for (let i = 0; i < parNum; i++) {
                 let lastPar: RPCPar = { typeId: 0, typeName: "", name: "", default: 0 }
+                checkBufLen(buf, off, 1)
                 lastPar.typeId = buf[off]
                 lastPar.typeName = typeNames[lastPar.typeId]
                 s = fromLEBuf(buf, off)
@@ -795,9 +836,11 @@ const TypeBuf: fromBuf = {
                 off = t.offset
                 par.push(lastPar)
             }
+            checkBufLen(buf, off, 1)
             resNum = buf[off++]
             for (let i = 0; i < resNum; i++) {
                 let res: RPCResult = { typeId: 0, typeName: "", name: "" }
+                checkBufLen(buf, off, 1)
                 res.typeId = buf[off]
                 res.typeName = typeNames[res.typeId]
                 s = fromLEBuf(buf, off + 1)
@@ -840,9 +883,16 @@ var TypesFrom: typesFrom = {
     0x20: TypeBuf[e.RPC].fromBuf,
     //0x21: TypeBuf[e.Byte].fromBuf
 }
+/**
+ * Decodes String where first bytes are length encoded using LEB128
+ * @param buf Buffer to red from
+ * @param offset position to start reading from
+ * @throws LengthError
+ */
 function fromLEBuf(buf: Buffer, offset: number) {
     let res = numFrom128(buf, offset),
         end = res.offset + res.val
+    checkBufLen(buf, res.offset, res.val)
     return { offset: end, val: buf.slice(res.offset, end).toString('utf8') }
 }
 
@@ -860,11 +910,19 @@ function numTo128(num: number) {
 function numTo2Byte(num: number) {
     return Buffer.from([(this >> 8) & 0xff, this & 0xff])
 }
+
+/**
+ * Decodes a number encoded in LEB128
+ * @param buf Buffer to red from
+ * @param offset position to start reading from
+ * @throws LengthError
+ */
 function numFrom128(buf: Buffer, offset: number) {
     let r = 0, n = buf[offset]
     offset++
     r = n & 0x7f;
     while (n > 0x7f) {
+        checkBufLen(buf, offset, 1)
         n = buf[offset]
         r = (r << 7) + (n & 0x7f)
         offset++
@@ -873,4 +931,31 @@ function numFrom128(buf: Buffer, offset: number) {
         val: r,
         offset
     }
+}
+/**
+ * Error thrown when buffer is too short
+ */
+export class LengthError extends Error {
+    buf: Buffer
+    position: number
+    constructor(buf: Buffer, possition: number, length: number)
+    constructor(mesg: string)
+    constructor(mesg: string | Buffer, pos = 0, length = 1) {
+        if (typeof mesg !== "string") {
+            super(`Trying to read ${length} bytes from position ${pos} of a buffer that is ${mesg.length} long`)
+            this.buf = mesg
+            this.position = pos
+        }
+        else super(mesg)
+    }
+}
+/**
+ * Check if the Buffer is long enought
+ * @param buf Buffer to check the length of
+ * @param start Position to read from
+ * @param length Number of bytes that will be read
+ * @throws LengthError
+ */
+function checkBufLen(buf: Buffer, start: number, length: number) {
+    if (buf.length < start + length - 1) throw new LengthError(buf, start, length)
 }
