@@ -5,7 +5,8 @@
         "noImplicitAny": false,
         "sourceMap": false,
         "declaration": true,
-        "declarationDir": "types"
+        "declarationDir": "types",
+        "moduleResolution": "node"
     },
     "exclude": [
         "types"

@@ -21,6 +21,10 @@ class Client {
         this.reAssign = {};
         this.beingAssigned = [];
         this.recProto = {
+            /** Keep Alive */
+            0x00: (buf, off) => {
+                return off;
+            },
             /** Protocol Version Unsupported */
             0x02: (buf, off) => {
                 checkBufLen(buf, off, 2);
@@ -328,7 +332,7 @@ class Client {
             }
         }
         else
-            throw new Error("Unknown Message Type");
+            throw new Error("Unknown Message Type " + buf[off]);
     }
     afterConnect() {
         this.conCallback(true, null, this.is2_0);

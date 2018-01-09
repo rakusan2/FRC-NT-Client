@@ -138,9 +138,13 @@ export class Client {
                 } else throw e
             }
         }
-        else throw new Error("Unknown Message Type")
+        else throw new Error("Unknown Message Type " + buf[off])
     }
     private readonly recProto: { [key: number]: (buf: Buffer, offset: number) => number } = {
+        /** Keep Alive */
+        0x00:(buf,off)=>{
+            return off
+        },
         /** Protocol Version Unsupported */
         0x02: (buf, off) => {
             checkBufLen(buf, off, 2)
