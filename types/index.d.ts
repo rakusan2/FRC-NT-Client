@@ -22,6 +22,8 @@ export declare class Client {
     private reAssign;
     private beingAssigned;
     private continuation;
+    private strictInput;
+    constructor(options?: clientOptions);
     /**
      * True if the Client has completed its hello and is connected
      */
@@ -120,6 +122,7 @@ export declare class Client {
      * @param immediate whether the write should happen right away
      */
     write(buf: Buffer, immediate?: boolean): void;
+    private fixType(val, type);
 }
 export interface Entry {
     typeID: number;
@@ -136,4 +139,7 @@ export declare class LengthError extends Error {
     position: number;
     constructor(buf: Buffer, possition: number, length: number);
     constructor(mesg: string);
+}
+export interface clientOptions {
+    strictInput?: boolean;
 }

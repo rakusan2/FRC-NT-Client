@@ -13,17 +13,26 @@ npm install wpilib-nt-client
 // Decleration
 const ntClient = require('wpilib-nt-client');
 
+const client = new ntClient.Client()
+
 // Connects the client to the server on team 3571's roborio
-ntClient.start((isConnected, err) => {
+client.start((isConnected, err) => {
     // Displays the error and the state of connection
     console.log({ isConnected, err });
 }, 'roborio-3571.local');
 
 // Adds a listener to the client
-ntClient.addListener((key, val, type, id) => {
+client.addListener((key, val, type, id) => {
     console.log({ key, val, type, id });
 })
 ```
+## Constructor
+- `Client()`
+    - Standard Constructor
+- `Client(options)`
+    - **options** an object containing is **strictInput** with a boolean value
+        - **strictInput** Does not try to correct incorrect types
+
 ## Properties
 - `.start((connected, err, is2_0) => any, address, port)`
     - Connects the client to a specific address and port

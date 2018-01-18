@@ -2,9 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const ieee754 = require("ieee754");
 const net = require("net");
+const buffer_1 = require("buffer");
 var strLenIdent = numTo128;
 class Client {
-    constructor() {
+    constructor(options) {
         this.clientName = "NodeJS" + Date.now();
         this.connected = false;
         this.entries = {};
@@ -20,6 +21,7 @@ class Client {
         this.is2_0 = false;
         this.reAssign = {};
         this.beingAssigned = [];
+        this.strictInput = false;
         this.recProto = {
             /** Keep Alive */
             0x00: (buf, off) => {
@@ -29,13 +31,13 @@ class Client {
             0x02: (buf, off) => {
                 checkBufLen(buf, off, 2);
                 var ver = `${buf[off++]}.${buf[off++]}`;
-                if (ver === '2.0') {
+                if (ver === "2.0") {
                     this.reconnect = true;
                     this.is2_0 = true;
                     strLenIdent = numTo2Byte;
                 }
                 else
-                    this.conCallback(false, new Error('Unsupported protocol: ' + ver), this.is2_0);
+                    this.conCallback(false, new Error("Unsupported protocol: " + ver), this.is2_0);
                 return off;
             },
             /** Server Hello Complete */
@@ -170,7 +172,7 @@ class Client {
                 for (let i = 0; i < 4; i++) {
                     val = (val << 8) + buf[off + i];
                 }
-                if (val === 0xD06CB27A) {
+                if (val === 0xd06cb27a) {
                     this.entries = {};
                     this.keymap = {};
                 }
@@ -200,7 +202,7 @@ class Client {
                     this.write(toServer.hello2_0);
                 }
                 else {
-                    let s = TypeBuf[2 /* String */].toBuf(serverName), buf = Buffer.allocUnsafe(s.length + 3);
+                    let s = TypeBuf[2 /* String */].toBuf(serverName), buf = buffer_1.Buffer.allocUnsafe(s.length + 3);
                     buf[0] = 0x01;
                     buf[1] = 3;
                     buf[2] = 0;
@@ -213,8 +215,12 @@ class Client {
                 this.afterConnect();
             }
         };
-        this.keepAlive = Buffer.from([0]);
+        this.keepAlive = buffer_1.Buffer.from([0]);
         this.buffersToSend = [];
+        if (options == undefined)
+            return;
+        if (options.strictInput)
+            this.strictInput = true;
     }
     /**
      * True if the Client has completed its hello and is connected
@@ -234,20 +240,21 @@ class Client {
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(callback, address = '127.0.0.1', port = 1735) {
+    start(callback, address = "127.0.0.1", port = 1735) {
         this.connected = false;
         this.address = address;
         this.port = port;
         this.conCallback = callback;
         this.reAssign = {};
         this.beingAssigned = [];
-        this.client = net.connect(port, address, () => {
+        this.client = net
+            .connect(port, address, () => {
             this.toServer.Hello(this.clientName);
-            this.client.on('data', data => {
+            this.client.on("data", data => {
                 let pos = 0, buf = data;
                 if (this.continuation != null) {
                     pos = this.continuation.offset;
-                    buf = Buffer.concat([this.continuation.buf, buf]);
+                    buf = buffer_1.Buffer.concat([this.continuation.buf, buf]);
                     this.continuation = null;
                 }
                 try {
@@ -257,7 +264,8 @@ class Client {
                     this.conCallback(true, e, this.is2_0);
                 }
             });
-        }).on('close', hadError => {
+        })
+            .on("close", hadError => {
             this.connected = false;
             this.oldEntries = this.entries;
             this.entries = {};
@@ -267,7 +275,8 @@ class Client {
             }
             else if (!hadError)
                 callback(false, null, this.is2_0);
-        }).on('error', err => callback(false, err, this.is2_0));
+        })
+            .on("error", err => callback(false, err, this.is2_0));
     }
     /**
      * Adds and returns a Listener to be called on change of an Entry
@@ -349,12 +358,17 @@ class Client {
     Assign(val, name, persist = false) {
         let type = getType(val);
         if (this.is2_0 && type === 3 /* RawData */)
-            return new Error('2.0 does not have Raw Data');
+            return new Error("2.0 does not have Raw Data");
         if (type === 32 /* RPC */)
-            return new Error('Clients can not assign an RPC');
+            return new Error("Clients can not assign an RPC");
         if (!this.connected) {
             let nID = this.newKeyMap.length;
-            this.newKeyMap[nID] = { typeID: type, val, flags: +persist, name: name };
+            this.newKeyMap[nID] = {
+                typeID: type,
+                val,
+                flags: +persist,
+                name: name
+            };
             this.listeners.map(e => e(name, val, typeNames[type], "add", -nID - 1, +persist));
             return;
         }
@@ -368,7 +382,7 @@ class Client {
         else {
             this.beingAssigned.push(name);
         }
-        let n = TypeBuf[2 /* String */].toBuf(name), f = TypeBuf[type].toBuf(val), nlen = n.length, assignLen = this.is2_0 ? 6 : 7, len = f.length + nlen + assignLen, buf = Buffer.allocUnsafe(len);
+        let n = TypeBuf[2 /* String */].toBuf(name), f = TypeBuf[type].toBuf(val), nlen = n.length, assignLen = this.is2_0 ? 6 : 7, len = f.length + nlen + assignLen, buf = buffer_1.Buffer.allocUnsafe(len);
         buf[0] = 0x10;
         n.write(buf, 1);
         buf[nlen + 1] = type;
@@ -389,7 +403,9 @@ class Client {
     Update(id, val) {
         if (id < 0) {
             let nEntry = this.newKeyMap[-id - 1];
-            if (checkType(val, nEntry.typeID)) {
+            let testVal = this.fixType(val, nEntry.typeID);
+            if (testVal != null) {
+                val = testVal;
                 if (this.connected) {
                     if (nEntry.name in this.keymap) {
                         id = this.keymap[nEntry.name];
@@ -405,14 +421,14 @@ class Client {
                 }
             }
             else
-                return new Error('Wrong Type');
+                return new Error(`Wrong Type: ${val} is not a ${typeNames[nEntry.typeID]}`);
         }
         if (!(id in this.entries))
-            return new Error('ID not found');
-        let entry = this.entries[id];
-        if (!checkType(val, entry.typeID))
-            return new Error('Wrong Type');
-        entry.val = val;
+            return new Error("ID not found");
+        let entry = this.entries[id], testVal = this.fixType(val, entry.typeID);
+        if (testVal == null)
+            return new Error(`Wrong Type: ${val} is not a ${typeNames[entry.typeID]}`);
+        val = entry.val = testVal;
         entry.sn++;
         if (!this.connected) {
             if (this.updatedIDs.indexOf(id) < 0)
@@ -420,7 +436,7 @@ class Client {
             this.listeners.map(e => e(entry.name, val, typeNames[entry.typeID], "update", id, entry.flags));
             return;
         }
-        let f = TypeBuf[entry.typeID].toBuf(val), updateLen = this.is2_0 ? 5 : 6, len = f.length + updateLen, buf = Buffer.allocUnsafe(len);
+        let f = TypeBuf[entry.typeID].toBuf(val), updateLen = this.is2_0 ? 5 : 6, len = f.length + updateLen, buf = buffer_1.Buffer.allocUnsafe(len);
         buf[0] = 0x11;
         buf[1] = id >> 8;
         buf[2] = id & 0xff;
@@ -439,10 +455,10 @@ class Client {
      */
     Flag(id, flags = false) {
         if (this.is2_0)
-            return new Error('2.0 does not support flags');
+            return new Error("2.0 does not support flags");
         if (!(id in this.entries))
-            return new Error('Does not exist');
-        this.write(Buffer.from([0x12, id >> 8, id & 0xff, +flags]));
+            return new Error("Does not exist");
+        this.write(buffer_1.Buffer.from([0x12, id >> 8, id & 0xff, +flags]));
     }
     /**
      * Deletes an Entry
@@ -450,17 +466,17 @@ class Client {
      */
     Delete(id) {
         if (this.is2_0)
-            return new Error('2.0 does not support delete');
+            return new Error("2.0 does not support delete");
         if (!(id in this.entries))
-            return new Error('Does not exist');
-        this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
+            return new Error("Does not exist");
+        this.write(buffer_1.Buffer.from([0x13, id >> 8, id & 0xff]));
     }
     /**
      * Deletes All Entries
      */
     DeleteAll() {
         if (this.is2_0)
-            return new Error('2.0 does not support delete');
+            return new Error("2.0 does not support delete");
         this.write(toServer.deleteAll);
         this.entries = {};
         this.keymap = {};
@@ -473,23 +489,24 @@ class Client {
      */
     RPCExec(id, val, callback) {
         if (this.is2_0)
-            return new Error('2.0 does not support RPC');
+            return new Error("2.0 does not support RPC");
         if (id in this.entries)
-            return new Error('Does not exist');
+            return new Error("Does not exist");
         let entry = this.entries[id];
         if (entry.typeID !== 32 /* RPC */)
-            return new Error('Is not an RPC');
+            return new Error("Is not an RPC");
         let par = entry.val.par, f = [], value, len = 0, parName = "";
         for (let i = 0; i < par.length; i++) {
             parName = par[i].name;
             value = parName in val ? val[par[i].name] : par[i].default;
-            if (!checkType(value, par[i].typeId))
+            let testVal = this.fixType(value, par[i].typeId);
+            if (testVal == null)
                 return new Error(`Wrong Type: ${value} is not a ${typeNames[par[i].typeId]}`);
-            let n = TypeBuf[par[i].typeId].toBuf(value);
+            let n = TypeBuf[par[i].typeId].toBuf(testVal);
             len += n.length;
             f.push(n);
         }
-        let encLen = numTo128(len), buf = Buffer.allocUnsafe(len + encLen.length + 5), off = 5 + encLen.length, randId = Math.floor(Math.random() * 0xffff);
+        let encLen = numTo128(len), buf = buffer_1.Buffer.allocUnsafe(len + encLen.length + 5), off = 5 + encLen.length, randId = Math.floor(Math.random() * 0xffff);
         buf[0] = 0x21;
         buf[1] = id >> 8;
         buf[2] = id & 0xff;
@@ -511,7 +528,9 @@ class Client {
     write(buf, immediate = false) {
         if (this.aliveTimer)
             clearTimeout(this.aliveTimer);
-        this.aliveTimer = setTimeout(() => { this.write(this.keepAlive); }, 1000);
+        this.aliveTimer = setTimeout(() => {
+            this.write(this.keepAlive);
+        }, 1000);
         if (this.aliveTimer.unref)
             this.aliveTimer.unref();
         if (immediate)
@@ -520,9 +539,97 @@ class Client {
             this.buffersToSend.push(buf);
             if (!this.bufferTimer)
                 this.bufferTimer = setTimeout(() => {
-                    this.client.write(Buffer.concat(this.buffersToSend));
+                    this.client.write(buffer_1.Buffer.concat(this.buffersToSend));
                     this.bufferTimer = null;
                 }, 20);
+        }
+    }
+    fixType(val, type) {
+        if (Array.isArray(val)) {
+            if (type === 16 /* BoolArray */) {
+                if (val.every(e => typeof e === "boolean"))
+                    return val;
+                else if (!this.strictInput) {
+                    let tryVal = [];
+                    for (let i = 0; i < val.length; i++) {
+                        if (val[i] == "true" || val[i] == "false")
+                            tryVal.push(val[i] == "true");
+                        else
+                            return;
+                    }
+                    return tryVal;
+                }
+            }
+            else if (type === 17 /* DoubleArray */) {
+                if (val.every(e => typeof e === "number")) {
+                    return val;
+                }
+                else if (!this.strictInput) {
+                    let tryVal = [];
+                    for (let i = 0; i < val.length; i++) {
+                        let testVal = parseFloat(val[i]);
+                        if (Number.isNaN(testVal))
+                            return;
+                        else
+                            tryVal.push(testVal);
+                    }
+                    return tryVal;
+                }
+            }
+            else if (type === 18 /* StringArray */) {
+                if (val.every(e => typeof e === "string")) {
+                    return val;
+                }
+                else if (!this.strictInput) {
+                    return val.map(a => a.toString());
+                }
+            }
+        }
+        else {
+            if (type === 0 /* Boolean */) {
+                if (typeof val === "boolean") {
+                    return val;
+                }
+                else if (!this.strictInput &&
+                    (val == "true" || val == "false")) {
+                    return val == "true";
+                }
+            }
+            else if (type === 1 /* Double */) {
+                if (typeof val === "number") {
+                    return val;
+                }
+                else if (!this.strictInput) {
+                    let testVal = parseFloat(val);
+                    if (!Number.isNaN(testVal)) {
+                        return testVal;
+                    }
+                }
+            }
+            else if (type === 2 /* String */) {
+                if (!this.strictInput || typeof val == "string")
+                    return val.toString();
+            }
+            else if (type === 3 /* RawData */ && buffer_1.Buffer.isBuffer(val))
+                return val;
+        }
+        if (type === 3 /* RawData */ && !this.strictInput) {
+            if (typeof val == "number" &&
+                val <= 0xff &&
+                val >= 0 &&
+                Number.isInteger(val)) {
+                return buffer_1.Buffer.from([val]);
+            }
+            else if (Array.isArray(val) &&
+                val.every(a => typeof a == "number" &&
+                    a >= 0 &&
+                    a <= 0xff &&
+                    Number.isInteger(a))) {
+                return buffer_1.Buffer.from(val);
+            }
+            else if (typeof val == "string") {
+                return buffer_1.Buffer.from(val);
+            }
         }
     }
 }
@@ -537,13 +644,15 @@ const typeNames = {
     0x12: "StringArray",
     0x20: "RPC"
 };
-function checkType(val, type) {
+function checkTypeI(val, type) {
     if (Array.isArray(val)) {
         if (type === 16 /* BoolArray */ && val.every(e => typeof e === "boolean"))
             return true;
-        else if (type === 17 /* DoubleArray */ && val.every(e => typeof e === "number"))
+        else if (type === 17 /* DoubleArray */ &&
+            val.every(e => typeof e === "number"))
             return true;
-        else if (type === 18 /* StringArray */ && val.every(e => typeof e === "string"))
+        else if (type === 18 /* StringArray */ &&
+            val.every(e => typeof e === "string"))
             return true;
         else
             return false;
@@ -555,7 +664,7 @@ function checkType(val, type) {
             return true;
         else if (type === 2 /* String */ && typeof val === "string")
             return true;
-        else if (type === 3 /* RawData */ && Buffer.isBuffer(val))
+        else if (type === 3 /* RawData */ && buffer_1.Buffer.isBuffer(val))
             return true;
         else
             return false;
@@ -579,18 +688,18 @@ function getType(val) {
             return 0x01;
         else if (typeof val === "string")
             return 0x02;
-        else if (Buffer.isBuffer(val))
+        else if (buffer_1.Buffer.isBuffer(val))
             return 0x03;
     }
 }
 const toServer = {
-    helloComplete: Buffer.from([0x05]),
-    deleteAll: Buffer.from([0x14, 0xD0, 0x6C, 0xB2, 0x7A]),
-    hello2_0: Buffer.from([0x01, 2, 0])
+    helloComplete: buffer_1.Buffer.from([0x05]),
+    deleteAll: buffer_1.Buffer.from([0x14, 0xd0, 0x6c, 0xb2, 0x7a]),
+    hello2_0: buffer_1.Buffer.from([0x01, 2, 0])
 };
 const TypeBuf = {
     0x00: {
-        toBuf: (val) => {
+        toBuf: val => {
             return {
                 length: 1,
                 write: (buf, off) => {
@@ -607,7 +716,7 @@ const TypeBuf = {
         }
     },
     0x01: {
-        toBuf: (val) => {
+        toBuf: val => {
             return {
                 length: 8,
                 write: (buf, off) => {
@@ -624,8 +733,11 @@ const TypeBuf = {
         }
     },
     0x02: {
-        toBuf: (val) => {
-            let bufT = Buffer.concat([strLenIdent(val.length), Buffer.from(val, 'utf8')]);
+        toBuf: val => {
+            let bufT = buffer_1.Buffer.concat([
+                strLenIdent(val.length),
+                buffer_1.Buffer.from(val, "utf8")
+            ]);
             return {
                 length: bufT.length,
                 write: (buf, off) => {
@@ -638,7 +750,7 @@ const TypeBuf = {
         }
     },
     0x03: {
-        toBuf: (val) => {
+        toBuf: val => {
             let len = numTo128(val.length);
             return {
                 length: val.length + len.length,
@@ -649,7 +761,7 @@ const TypeBuf = {
             };
         },
         fromBuf: (buf, off) => {
-            let { val, offset } = numFrom128(buf, off), nbuf = Buffer.allocUnsafe(val), end = offset + val;
+            let { val, offset } = numFrom128(buf, off), nbuf = buffer_1.Buffer.allocUnsafe(val), end = offset + val;
             checkBufLen(buf, off, val);
             buf.copy(nbuf, 0, offset);
             return {
@@ -659,7 +771,7 @@ const TypeBuf = {
         }
     },
     0x10: {
-        toBuf: (val) => {
+        toBuf: val => {
             return {
                 length: val.length + 1,
                 write: (buf, off) => {
@@ -685,7 +797,7 @@ const TypeBuf = {
         }
     },
     0x11: {
-        toBuf: (val) => {
+        toBuf: val => {
             let len = val.length;
             return {
                 length: 8 * val.length + 1,
@@ -713,10 +825,13 @@ const TypeBuf = {
         }
     },
     0x12: {
-        toBuf: (val) => {
+        toBuf: val => {
             let lens = [], len = 1;
             for (let i = 0; i < val.length; i++) {
-                lens[i] = Buffer.concat([strLenIdent(val[i].length), Buffer.from(val[i])]);
+                lens[i] = buffer_1.Buffer.concat([
+                    strLenIdent(val[i].length),
+                    buffer_1.Buffer.from(val[i])
+                ]);
                 len += lens[i].length;
             }
             return {
@@ -751,7 +866,7 @@ const TypeBuf = {
             checkBufLen(buf, off, 1);
             let st;
             if (buf[off] !== 1)
-                throw new Error('Unsupported RPC Definition');
+                throw new Error("Unsupported RPC Definition");
             off++;
             st = fromLEBuf(buf, off);
             off = st.offset;
@@ -759,7 +874,12 @@ const TypeBuf = {
             let name = st.val, parNum = buf[off], par = [], results = [], s = { offset: 0, val: "" }, resNum = 0;
             off++;
             for (let i = 0; i < parNum; i++) {
-                let lastPar = { typeId: 0, typeName: "", name: "", default: 0 };
+                let lastPar = {
+                    typeId: 0,
+                    typeName: "",
+                    name: "",
+                    default: 0
+                };
                 checkBufLen(buf, off, 1);
                 lastPar.typeId = buf[off];
                 lastPar.typeName = typeNames[lastPar.typeId];
@@ -802,7 +922,8 @@ var TypesFrom = {
     0x10: TypeBuf[16 /* BoolArray */].fromBuf,
     0x11: TypeBuf[17 /* DoubleArray */].fromBuf,
     0x12: TypeBuf[18 /* StringArray */].fromBuf,
-    0x20: TypeBuf[32 /* RPC */].fromBuf,
+    0x20: TypeBuf[32 /* RPC */].fromBuf
+    //0x21: TypeBuf[e.Byte].fromBuf
 };
 /**
  * Decodes String where first bytes are length encoded using LEB128
@@ -813,7 +934,7 @@ var TypesFrom = {
 function fromLEBuf(buf, offset) {
     let res = numFrom128(buf, offset), end = res.offset + res.val;
     checkBufLen(buf, res.offset, res.val);
-    return { offset: end, val: buf.slice(res.offset, end).toString('utf8') };
+    return { offset: end, val: buf.slice(res.offset, end).toString("utf8") };
 }
 function numTo128(num) {
     let n = num;
@@ -823,10 +944,10 @@ function numTo128(num) {
         n = n >> 7;
     }
     r.push(n);
-    return Buffer.from(r);
+    return buffer_1.Buffer.from(r);
 }
 function numTo2Byte(num) {
-    return Buffer.from([(this >> 8) & 0xff, this & 0xff]);
+    return buffer_1.Buffer.from([(this >> 8) & 0xff, this & 0xff]);
 }
 /**
  * Decodes a number encoded in LEB128
