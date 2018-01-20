@@ -151,7 +151,7 @@ export class Client {
     private read(buf: Buffer, off: number) {
         checkBufLen(buf, off, 1);
         if (buf.length == off) return;
-        if (buf[off] in this.recProto) {
+        if (typeof this.recProto[buf[off]] != 'undefined') {
             try {
                 off = this.recProto[buf[off]](buf, off + 1);
                 this.read(buf, off);
@@ -190,7 +190,7 @@ export class Client {
         0x03: (buf, off) => {
             this.connected = true;
             for (let key in this.oldEntries) {
-                if (!(key in this.entries)) {
+                if (typeof this.entries[key] == 'undefined') {
                     let old = this.oldEntries[key];
                     this.Assign(old.val, old.name, old.flags > 0);
                 }
@@ -199,7 +199,7 @@ export class Client {
                 this.afterConnect();
             } else {
                 this.newKeyMap.map(e => {
-                    if (!(e.name in this.keymap)) {
+                    if (typeof this.keymap[e.name] == 'undefined') {
                         this.Assign(e.val, e.name, e.flags > 0);
                     }
                 });
@@ -207,7 +207,7 @@ export class Client {
                 if (this.known) {
                     while (this.updatedIDs.length > 0) {
                         let e = this.updatedIDs.pop();
-                        if (e in this.entries)
+                        if (typeof this.entries[e] != 'undefined')
                             this.Update(e, this.entries[e].val);
                     }
                 }
@@ -265,7 +265,7 @@ export class Client {
                     );
                 }
             }
-            if (key in this.reAssign) {
+            if (typeof this.reAssign[key] != 'undefined') {
                 let toUpdate = this.reAssign[key];
                 this.Update(id, toUpdate.val);
                 if (!this.is2_0 && entry.flags !== toUpdate.flags) {
@@ -284,7 +284,7 @@ export class Client {
                 val = TypesFrom[type](buf, off),
                 typeName = typeNames[type],
                 name = "";
-            if (id in this.entries && type === this.entries[id].typeID) {
+            if (typeof this.entries[id] != 'undefined' && type === this.entries[id].typeID) {
                 let entry = this.entries[id];
                 entry.sn = sn;
                 entry.val = val.val;
@@ -320,7 +320,7 @@ export class Client {
             checkBufLen(buf, off, 3);
             let id = (buf[off++] << 8) + buf[off++],
                 flags = buf[off++];
-            if (id in this.entries) {
+            if (typeof this.entries[id] != 'undefined') {
                 let entry = this.entries[id];
                 entry.flags = flags;
                 for (let i = 0; i < this.listeners.length; i++) {
@@ -412,7 +412,7 @@ export class Client {
                     results[res[i].name] = s.val;
                 }
             }
-            if (executeID in this.RPCExecCallback) {
+            if (typeof this.RPCExecCallback[executeID] != 'undefined') {
                 this.RPCExecCallback[executeID](results);
                 delete this.RPCExecCallback[executeID];
             }
@@ -468,7 +468,7 @@ export class Client {
             );
             return;
         }
-        if (name in this.keymap) {
+        if (typeof this.keymap[name] != 'undefined') {
             return this.Update(this.keymap[name], val);
         }
         if (this.beingAssigned.indexOf(name) >= 0) {
@@ -506,7 +506,7 @@ export class Client {
             if (testVal != null) {
                 val = testVal;
                 if (this.connected) {
-                    if (nEntry.name in this.keymap) {
+                    if (typeof this.keymap[nEntry.name] != 'undefined') {
                         id = this.keymap[nEntry.name];
                     } else {
                         return this.Assign(val, nEntry.name, nEntry.flags > 0);
@@ -530,7 +530,7 @@ export class Client {
                     `Wrong Type: ${val} is not a ${typeNames[nEntry.typeID]}`
                 );
         }
-        if (!(id in this.entries)) return new Error("ID not found");
+        if (typeof this.entries[id] == 'undefined') return new Error("ID not found");
         let entry = this.entries[id],
             testVal = this.fixType(val, entry.typeID);
         if (testVal == null)
@@ -583,7 +583,7 @@ export class Client {
      */
     Flag(id: number, flags: boolean | number = false) {
         if (this.is2_0) return new Error("2.0 does not support flags");
-        if (!(id in this.entries)) return new Error("Does not exist");
+        if (typeof this.entries[id] == 'undefined') return new Error("Does not exist");
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, +flags]));
     }
     /**
@@ -592,7 +592,7 @@ export class Client {
      */
     Delete(id: number) {
         if (this.is2_0) return new Error("2.0 does not support delete");
-        if (!(id in this.entries)) return new Error("Does not exist");
+        if (typeof this.entries[id] == 'undefined') return new Error("Does not exist");
         this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
     }
     /**
@@ -612,7 +612,7 @@ export class Client {
      */
     RPCExec(id: number, val: Object, callback: (result: Object) => any) {
         if (this.is2_0) return new Error("2.0 does not support RPC");
-        if (id in this.entries) return new Error("Does not exist");
+        if (typeof this.entries[id] == 'undefined') return new Error("Does not exist");
         let entry = this.entries[id];
         if (entry.typeID !== e.RPC) return new Error("Is not an RPC");
         let par = (<RPC>entry.val).par,
@@ -622,7 +622,7 @@ export class Client {
             parName = "";
         for (let i = 0; i < par.length; i++) {
             parName = par[i].name;
-            value = parName in val ? val[par[i].name] : par[i].default;
+            value = typeof val[parName] != 'undefined' ? val[parName] : par[i].default;
             let testVal = this.fixType(value, par[i].typeId);
             if (testVal == null)
                 return new Error(
