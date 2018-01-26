@@ -9,7 +9,7 @@ declare module 'ieee754'{
      */
     function read(buffer:Buffer,offset:number,isLE:boolean,mLen:number,nBytes:number):number
     /** 
-     * Read IEEE754 value from buffer
+     * Write IEEE754 value to buffer
      * @param buffer The Buffer
      * @param value Value to set
      * @param offset Offset into the buffer
