@@ -1,6 +1,7 @@
 import * as ieee754 from "ieee754";
 import * as net from "net";
 import { Buffer } from "buffer";
+import * as url from 'url'
 var strLenIdent = numTo128;
 export type Listener = (
     key: string,
@@ -11,6 +12,7 @@ export type Listener = (
     flags: number
 ) => any;
 export class Client {
+    private debug=(level:debugType,st:any)=>{}
     serverName: String;
     clientName = "NodeJS" + Date.now();
     private client: net.Socket;
@@ -65,6 +67,9 @@ export class Client {
         address = "127.0.0.1",
         port = 1735
     ) {
+        let parsedAddress = url.parse(address)
+        address = parsedAddress.hostname
+        port = parseInt(parsedAddress.port) || port
         this.connected = false;
         this.address = address;
         this.port = port;
@@ -73,6 +78,8 @@ export class Client {
         this.beingAssigned = [];
         this.client = net
             .connect(port, address, () => {
+                this.debug(debugType.basic,`Connecting to ${address} on port ${port}`)
+
                 this.toServer.Hello(this.clientName);
                 this.client.on("data", data => {
                     let pos = 0,
@@ -174,6 +181,8 @@ export class Client {
         0x02: (buf, off) => {
             checkBufLen(buf, off, 2);
             var ver = `${buf[off++]}.${buf[off++]}`;
+            this.debug(debugType.basic,`version ${this.is2_0?'2.0':'3.0'}`)
+            this.debug(debugType.basic,`Server supports version ${ver}`)
             if (ver === "2.0") {
                 this.reconnect = true;
                 this.is2_0 = true;
@@ -188,6 +197,7 @@ export class Client {
         },
         /** Server Hello Complete */
         0x03: (buf, off) => {
+            this.debug(debugType.messageType, 'Received Server Hello Complete')
             this.connected = true;
             for (let key in this.oldEntries) {
                 if (typeof this.entries[key] == 'undefined') {
@@ -216,16 +226,19 @@ export class Client {
         },
         /** Server Hello */
         0x04: (buf, off) => {
+            this.debug(debugType.messageType, `Received Server Hello`)
             checkBufLen(buf, off, 1);
             let flags = this.is2_0 ? 0 : buf[off++];
             this.known = flags > 0;
             let sName = TypesFrom[e.String](buf, off);
             this.serverName = sName.val;
+            this.debug(debugType.messages,{serverName:sName.val,isKnown:flags>0})
             return sName.offset;
         },
         /** Entry Assignment */
         0x10: (buf, off) => {
             let keyName = TypesFrom[e.String](buf, off);
+            this.debug(debugType.messageType, `Received entry assignment for ${keyName.val}`)
             off = keyName.offset;
             checkBufLen(buf, off, 5 + (this.is2_0 ? 0 : 1));
             let type = buf[off++],
@@ -273,10 +286,12 @@ export class Client {
                 }
                 delete this.reAssign[key];
             }
+            this.debug(debugType.messages, {key:keyName.val,type,id,sequenceNumber:entry.sn,flags:entry.flags,value:entry.val})
             return val.offset;
         },
         /** Entry Update */
         0x11: (buf, off) => {
+            this.debug(debugType.messageType,'Received an entry update')
             checkBufLen(buf, off, 4 + (this.is2_0 ? 0 : 1));
             let id = (buf[off++] << 8) + buf[off++],
                 sn = (buf[off++] << 8) + buf[off++],
@@ -313,10 +328,12 @@ export class Client {
                     }
                 }
             }
+            this.debug(debugType.messages,{id,sequenceNumber:sn,type,value:val.val})
             return val.offset;
         },
         /** Entry Flags Update */
         0x12: (buf, off) => {
+            this.debug(debugType.messageType,'Received a flags update')
             checkBufLen(buf, off, 3);
             let id = (buf[off++] << 8) + buf[off++],
                 flags = buf[off++];
@@ -347,10 +364,12 @@ export class Client {
                     }
                 }
             }
+            this.debug(debugType.messages,{id,flags})
             return off;
         },
         /** Entry Delete */
         0x13: (buf, off) => {
+            this.debug(debugType.messageType,'Received an entry delete')
             checkBufLen(buf, off, 2);
             let id = (buf[off++] << 8) + buf[off++],
                 name = this.entries[id].name,
@@ -381,10 +400,12 @@ export class Client {
                     );
                 }
             }
+            this.debug(debugType.messages,{id})
             return off;
         },
         /** Clear All Entries */
         0x14: (buf, off) => {
+            this.debug(debugType.messageType,'Received an entry update')
             checkBufLen(buf, off, 4);
             let val = 0;
             for (let i = 0; i < 4; i++) {
@@ -394,10 +415,12 @@ export class Client {
                 this.entries = {};
                 this.keymap = {};
             }
+            this.debug(debugType.messages,{val,isCorrect:val === 0xd06cb27a})
             return off + 4;
         },
         /** RPC Response */
         0x21: (buf, off) => {
+            this.debug(debugType.messageType,'Received an RPC Response')
             checkBufLen(buf, off, 4);
             let id = (buf[off++] << 8) + buf[off++],
                 executeID = (buf[off++] << 8) + buf[off++],
@@ -416,6 +439,7 @@ export class Client {
                 this.RPCExecCallback[executeID](results);
                 delete this.RPCExecCallback[executeID];
             }
+            this.debug(debugType.messages,{id,executeID,results})
             return off;
         }
     };
@@ -427,6 +451,7 @@ export class Client {
     }
     private readonly toServer = {
         Hello: (serverName: string) => {
+            this.debug(debugType.messageType,'Sending a Hello')
             if (this.is2_0) {
                 this.write(toServer.hello2_0);
             } else {
@@ -440,6 +465,7 @@ export class Client {
             }
         },
         HelloComplete: () => {
+            this.debug(debugType.messageType,'Sending a Hello Complete')
             this.write(toServer.helloComplete, true);
             this.afterConnect();
         }
@@ -451,6 +477,7 @@ export class Client {
      * @param persist Whether the Value should persist on the server through a restart
      */
     Assign(val: any, name: string, persist: boolean | number = false) {
+        this.debug(debugType.messageType,`Assigning ${name}`)
         let type = getType(val);
         if (this.is2_0 && type === e.RawData)
             return new Error("2.0 does not have Raw Data");
@@ -492,6 +519,7 @@ export class Client {
         buf[nlen + 5] = 0;
         if (!this.is2_0) buf[nlen + 6] = +persist;
         f.write(buf, nlen + assignLen);
+        this.debug(debugType.messages,{key:name,type,flags:+persist,val})
         this.write(buf);
     }
     /**
@@ -500,6 +528,7 @@ export class Client {
      * @param val The value of the Entry
      */
     Update(id: number, val: any): Error {
+        this.debug(debugType.messageType,`Updating Entry`)
         if (id < 0) {
             let nEntry = this.newKeyMap[-id - 1];
             let testVal = this.fixType(val, nEntry.typeID);
@@ -564,6 +593,7 @@ export class Client {
         buf[4] = entry.sn & 0xff;
         if (!this.is2_0) buf[5] = entry.typeID;
         f.write(buf, updateLen);
+        this.debug(debugType.messages,{id, sequenceNumber:entry.sn,type:entry.typeID,value:val})
         this.write(buf);
         this.listeners.map(e =>
             e(
@@ -582,8 +612,10 @@ export class Client {
      * @param flags Whether the Entry should persist through a restart on the server
      */
     Flag(id: number, flags: boolean | number = false) {
+        this.debug(debugType.messageType,`Updating Flags`)
         if (this.is2_0) return new Error("2.0 does not support flags");
         if (typeof this.entries[id] == 'undefined') return new Error("Does not exist");
+        this.debug(debugType.messages,{id,flags:+flags})
         this.write(Buffer.from([0x12, id >> 8, id & 0xff, +flags]));
     }
     /**
@@ -591,14 +623,17 @@ export class Client {
      * @param id The ID of the Entry
      */
     Delete(id: number) {
+        this.debug(debugType.messageType,`Delete Entry`)
         if (this.is2_0) return new Error("2.0 does not support delete");
         if (typeof this.entries[id] == 'undefined') return new Error("Does not exist");
         this.write(Buffer.from([0x13, id >> 8, id & 0xff]));
+        this.debug(debugType.messages,`Delete ${id}`)
     }
     /**
      * Deletes All Entries
      */
     DeleteAll() {
+        this.debug(debugType.messageType,`Delete All Entries`)
         if (this.is2_0) return new Error("2.0 does not support delete");
         this.write(toServer.deleteAll);
         this.entries = {};
@@ -611,6 +646,7 @@ export class Client {
      * @param callback To be called with the Results
      */
     RPCExec(id: number, val: Object, callback: (result: Object) => any) {
+        this.debug(debugType.messageType,`Execute RPC`)
         if (this.is2_0) return new Error("2.0 does not support RPC");
         if (typeof this.entries[id] == 'undefined') return new Error("Does not exist");
         let entry = this.entries[id];
@@ -646,6 +682,7 @@ export class Client {
             f[i].write(buf, off);
             off += f[i].length;
         }
+        this.debug(debugType.messages,{id, randId, val})
         this.write(buf);
         this.RPCExecCallback[randId] = callback;
     }
@@ -665,14 +702,34 @@ export class Client {
             this.write(this.keepAlive);
         }, 1000);
         if (this.aliveTimer.unref) this.aliveTimer.unref();
-        if (immediate) this.client.write(buf);
+        if (immediate) {
+            
+        this.debug(debugType.basic,`Writing to Server`)
+        this.debug(debugType.everything,buf)
+            this.client.write(buf);
+        }
         else {
+            this.debug(debugType.everything,'Buffering write')
             this.buffersToSend.push(buf);
             if (!this.bufferTimer)
                 this.bufferTimer = setTimeout(() => {
+                    this.debug(debugType.basic,`Writing to Server`)
+                    this.debug(debugType.everything,buf)
                     this.client.write(Buffer.concat(this.buffersToSend));
                     this.bufferTimer = null;
                 }, 20);
+        }
+    }
+    private startDebug(name:string,debugLevel = debugType.basic){
+        if(typeof name == 'string' && name.length>0){
+            this.debug = (level:debugType,st:any)=>{
+                if(level>debugLevel)return
+                if(typeof st == 'string'){
+                    console.log(name+': '+st)
+                }else{
+                    console.log({[name]:st})
+                }
+            }
         }
     }
     private fixType(val: any, type: e) {
@@ -1214,4 +1271,15 @@ function checkBufLen(buf: Buffer, start: number, length: number) {
 
 export interface clientOptions {
     strictInput?: boolean;
+}
+export const enum debugType{
+    /** Client connection status */
+    basic,
+    /** All message types received */
+    messageType,
+    /** All decoded messages */
+    messages,
+    /** Client Status and write data */
+    everything,
+
 }
