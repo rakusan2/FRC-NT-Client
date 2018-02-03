@@ -720,7 +720,7 @@ export class Client {
                 }, 20);
         }
     }
-    private startDebug(name:string,debugLevel = debugType.basic){
+    startDebug(name:string,debugLevel = debugType.basic){
         if(typeof name == 'string' && name.length>0){
             this.debug = (level:debugType,st:any)=>{
                 if(level>debugLevel)return
