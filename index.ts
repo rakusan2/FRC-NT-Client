@@ -67,7 +67,8 @@ export class Client {
         address = "127.0.0.1",
         port = 1735
     ) {
-        let parsedAddress = url.parse(address)
+        /:\/\/\w/.test(address)
+        let parsedAddress = url.parse((/:\/\/\w/.test(address)?"":"tcp://")+address)
         address = parsedAddress.hostname
         port = parseInt(parsedAddress.port) || port
         this.connected = false;
@@ -76,9 +77,9 @@ export class Client {
         this.conCallback = callback;
         this.reAssign = {};
         this.beingAssigned = [];
+        this.debug(debugType.basic,`Connecting to ${address} on port ${port}`)
         this.client = net
             .connect(port, address, () => {
-                this.debug(debugType.basic,`Connecting to ${address} on port ${port}`)
 
                 this.toServer.Hello(this.clientName);
                 this.client.on("data", data => {

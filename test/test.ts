@@ -1,6 +1,7 @@
 import { Client, debugType } from "../";
 const ntClient = new Client();
 const ntClient2 = new Client();
+let args = process.argv.slice(2);
 ntClient.startDebug("Debug1", debugType.messageType);
 ntClient2.startDebug("Debug2", debugType.messageType);
 ntClient.start((con, err) => {
@@ -17,9 +18,9 @@ ntClient.start((con, err) => {
         console.log({ id, entry, ids });
         ntClient2.start((con, err) => {
             console.log({ con, err, type: "2nd" });
-        });
+        },args[0],parseInt(args[1])||undefined);
     }, 1000);
-});
+},args[0],parseInt(args[1])||undefined);
 ntClient.addListener((key, val, valType, type, id, flags) => {
     console.log({ key, val, valType, type, id, flags });
 });
