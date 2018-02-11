@@ -112,8 +112,14 @@ export class Client {
      * Adds and returns a Listener to be called on change of an Entry
      * @param callback Listener
      */
-    addListener(callback: Listener) {
+    addListener(callback: Listener,getCurrent?:boolean) {
         this.listeners.push(callback);
+        if(getCurrent && this.connected){
+            for(let key in this.keymap){
+                let entry = this.entries[this.keymap[key]]
+                callback(key,entry.val,typeNames[entry.typeID],"add",this.keymap[key],entry.flags)
+            }
+        }
         return callback;
     }
     /**
@@ -256,29 +262,7 @@ export class Client {
             entry.val = val.val;
             this.entries[id] = entry;
             this.keymap[key] = id;
-            for (let i = 0; i < this.listeners.length; i++) {
-                if (this.connected) {
-                    this.listeners[i](
-                        keyName.val,
-                        val.val,
-                        typeName,
-                        "add",
-                        id,
-                        entry.flags
-                    );
-                } else {
-                    this.lateCallbacks.push(() =>
-                        this.listeners[i](
-                            keyName.val,
-                            val.val,
-                            typeName,
-                            "add",
-                            id,
-                            entry.flags
-                        )
-                    );
-                }
-            }
+            this.callListeners(keyName.val, val.val, typeName, "add", id, entry.flags);
             if (typeof this.reAssign[key] != 'undefined') {
                 let toUpdate = this.reAssign[key];
                 this.Update(id, toUpdate.val);
@@ -305,9 +289,7 @@ export class Client {
                 entry.sn = sn;
                 entry.val = val.val;
                 name = entry.name;
-                for (let i = 0; i < this.listeners.length; i++) {
-                    if (this.connected) {
-                        this.listeners[i](
+                this.callListeners(
                             name,
                             val.val,
                             typeName,
@@ -315,19 +297,6 @@ export class Client {
                             id,
                             entry.flags
                         );
-                    } else {
-                        this.lateCallbacks.push(() =>
-                            this.listeners[i](
-                                name,
-                                val.val,
-                                typeName,
-                                "update",
-                                id,
-                                entry.flags
-                            )
-                        );
-                    }
-                }
             }
             this.debug(debugType.messages,{id,sequenceNumber:sn,type,value:val.val})
             return val.offset;
@@ -341,29 +310,14 @@ export class Client {
             if (typeof this.entries[id] != 'undefined') {
                 let entry = this.entries[id];
                 entry.flags = flags;
-                for (let i = 0; i < this.listeners.length; i++) {
-                    if (this.connected) {
-                        this.listeners[i](
+                this.callListeners(
                             entry.name,
                             entry.val,
                             typeNames[entry.typeID],
                             "flagChange",
                             id,
                             flags
-                        );
-                    } else {
-                        this.lateCallbacks.push(() =>
-                            this.listeners[i](
-                                entry.name,
-                                entry.val,
-                                typeNames[entry.typeID],
-                                "flagChange",
-                                id,
-                                flags
-                            )
-                        );
-                    }
-                }
+                        )
             }
             this.debug(debugType.messages,{id,flags})
             return off;
@@ -378,9 +332,7 @@ export class Client {
                 flags = this.entries[id].flags;
             delete this.entries[id];
             delete this.keymap[name];
-            for (let i = 0; i < this.listeners.length; i++) {
-                if (this.connected) {
-                    this.listeners[i](
+            this.callListeners(
                         name,
                         null,
                         typename,
@@ -388,19 +340,6 @@ export class Client {
                         id,
                         flags
                     );
-                } else {
-                    this.lateCallbacks.push(() =>
-                        this.listeners[i](
-                            name,
-                            null,
-                            typename,
-                            "delete",
-                            id,
-                            flags
-                        )
-                    );
-                }
-            }
             this.debug(debugType.messages,{id})
             return off;
         },
@@ -810,6 +749,17 @@ export class Client {
                 return Buffer.from(val);
             } else if (typeof val == "string") {
                 return Buffer.from(val);
+            }
+        }
+    }
+    private callListeners:Listener =(key,val,valType,type,id, flags)=>{
+        for (let i = 0; i < this.listeners.length; i++) {
+            if (this.connected) {
+                this.listeners[i](key,val,valType,type,id, flags);
+            } else {
+                this.lateCallbacks.push(() =>
+                    this.listeners[i](key,val,valType,type,id, flags)
+                );
             }
         }
     }

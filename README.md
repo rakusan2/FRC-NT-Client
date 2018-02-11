@@ -41,7 +41,7 @@ client.addListener((key, val, type, id) => {
     - **is2_0** - True if the client had to failover to 2.0 of the Network Tables protocol
     - **address** - The address of the Server. Defaults to loopback
     - **port** - The port of the server
-- `.addListener((key, value, valueType, type, id, flags) => any)`
+- `.addListener((key, value, valueType, type, id, flags) => any, getCurrent)`
     - Adds a callback to be called when a value has been added, updated, or deleted, and returns the Listener
     - **key** - The Key for the Entry
     - **value** - The value associated with the key
@@ -49,6 +49,7 @@ client.addListener((key, val, type, id) => {
     - **type** - The type of the callback. Possible Types are: "add", "update", "delete", "flagChange"
     - **id** - The ID of the Entry
     - **flags** - The flags of the Entry
+    - **getCurrent** - immediatly callback if connected with known entries
 - `.removeListener(listener)`
     - Removes the specified listener
     - **listener** - The Listener returned from `.addListener()`
