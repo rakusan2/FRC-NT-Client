@@ -17,6 +17,7 @@ export class Client {
     clientName = "NodeJS" + Date.now();
     private client: net.Socket;
     private connected = false;
+    private socketConnected = false
     private entries: { [key: number]: Entry } = {};
     private oldEntries: { [key: number]: Entry } = {};
     private keymap: { [key: string]: number } = {};
@@ -78,16 +79,19 @@ export class Client {
         let parsedAddress = url.parse((/:\/\/\w/.test(address) ? "" : "tcp://") + address)
         address = parsedAddress.hostname
         port = parseInt(parsedAddress.port) || port
+        this.conCallback = callback;
+        this.debug(debugType.basic, `Connecting to ${address} on port ${port}`)
+        this.__connect(address,port)
+    }
+    private __connect(address:string,port:number){
         this.connected = false;
         this.address = address;
         this.port = port;
-        this.conCallback = callback;
         this.reAssign = {};
         this.beingAssigned = [];
-        this.debug(debugType.basic, `Connecting to ${address} on port ${port}`)
         this.client = net
             .connect(port, address, () => {
-
+                this.socketConnected = true
                 this.toServer.Hello(this.clientName);
                 this.client.on("data", data => {
                     let pos = 0,
@@ -105,6 +109,8 @@ export class Client {
                 });
             })
             .on("close", hadError => {
+                this.debug(debugType.basic, 'Closing socket')
+                this.socketConnected = false
                 this.connected = false;
                 this.oldEntries = this.entries;
                 this.entries = {};
@@ -112,20 +118,33 @@ export class Client {
 
                 let reconn: NodeJS.Timer
                 if (!this.reconnect && this.reconnectDelay >= 20) {
-                    reconn = setTimeout(() => this.start(callback, address, port), this.reconnectDelay)
+                    reconn = setTimeout(() => {
+                        this.debug(debugType.basic, `Trying to reconnect to ${address}:${port}`)
+                        this.__connect(address, port);
+                    }, this.reconnectDelay)
                 }
                 if (this.reconnect) {
-                    this.start(callback, address, port);
-                } else if (!hadError) callback(false, null, this.is2_0);
+                    this.__connect(address, port);
+                } else if (!hadError) this.conCallback(false, null, this.is2_0);
             })
-            .on("error", err => callback(false, err, this.is2_0));
+            .on("error", err => {
+                let mesgPar = err.message.split(' ')
+                if (mesgPar.length < 2 || mesgPar[1] != 'ECONNREFUSED' || this.reconnectDelay < 20) {
+                    this.conCallback(false, err, this.is2_0)
+                }else{
+                    this.conCallback(false, null, this.is2_0)
+                }
+            })
+            .on('end', () => {
+                this.socketConnected = false
+            })
     }
     /** Attempts to stop the client */
-    stop(){
+    stop() {
         this.client.end()
     }
     /** Immediately closes the client */
-    destroy(){
+    destroy() {
         this.client.destroy()
     }
     /**
@@ -667,6 +686,7 @@ export class Client {
      */
     write(buf: Buffer, immediate = false) {
         if (this.aliveTimer) clearTimeout(this.aliveTimer);
+        if (!this.socketConnected) return
         this.aliveTimer = setTimeout(() => {
             this.write(this.keepAlive);
         }, 1000);

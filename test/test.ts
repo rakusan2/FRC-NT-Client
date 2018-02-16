@@ -6,7 +6,8 @@ ntClient.startDebug("Debug1", debugType.messages);
 ntClient2.startDebug("Debug2", debugType.messageType);
 ntClient.start((con, err, is2) => {
     console.log({ con, err,is2 });
-    if (!con) throw err;
+    if (err != null) throw err;
+    if(!con)return
     ntClient.Assign("3", "/SmartDashboard/test");
     ntClient.Assign("4", "/SmartDashboard/test");
     ntClient.Assign("5", "/SmartDashboard/test");
