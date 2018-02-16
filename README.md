@@ -41,6 +41,10 @@ client.addListener((key, val, type, id) => {
     - **is2_0** - True if the client had to failover to 2.0 of the Network Tables protocol
     - **address** - The address of the Server. Defaults to loopback
     - **port** - The port of the server
+- `.stop()`
+    - Tries to stop the client by sending a fin packet
+- `.destroy()`
+    - Closes the connection forcefully
 - `.addListener((key, value, valueType, type, id, flags) => any, getCurrent)`
     - Adds a callback to be called when a value has been added, updated, or deleted, and returns the Listener
     - **key** - The Key for the Entry
