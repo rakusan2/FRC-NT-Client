@@ -59,6 +59,13 @@ export class Client {
         return this.is2_0;
     }
 
+    /**
+     * Set and activate the reconnect feature
+     * 
+     * 
+     * Delay of 20 or less will deactivate this feature
+     * @param delay Time in milisecconds before the next reconnect attempt
+     */
     setReconnectDelay(delay: number) {
         this.reconnectDelay = delay
         this.debug(debugType.basic, `Setting Reconnect dellay to ${delay}`)
