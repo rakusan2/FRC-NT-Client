@@ -120,6 +120,14 @@ export class Client {
             })
             .on("error", err => callback(false, err, this.is2_0));
     }
+    /** Attempts to stop the client */
+    stop(){
+        this.client.end()
+    }
+    /** Immediately closes the client */
+    destroy(){
+        this.client.destroy()
+    }
     /**
      * Adds and returns a Listener to be called on change of an Entry
      * @param callback Listener
@@ -669,6 +677,7 @@ export class Client {
             this.debug(debugType.everything, buf)
             this.client.write(Buffer.concat(this.buffersToSend));
             this.bufferTimer = null;
+            this.buffersToSend = []
         }
         if (immediate) {
             writeFunc()
