@@ -45,6 +45,9 @@ client.addListener((key, val, type, id) => {
     - Tries to stop the client by sending a fin packet
 - `.destroy()`
     - Closes the connection forcefully
+- `.setReconnectDelay(delay)`
+    - **delay** set the delay before trying to reconnect
+    - If the dellay is less than 20 than it wll not attempt reconnect
 - `.addListener((key, value, valueType, type, id, flags) => any, getCurrent)`
     - Adds a callback to be called when a value has been added, updated, or deleted, and returns the Listener
     - **key** - The Key for the Entry
