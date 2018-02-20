@@ -1181,7 +1181,6 @@ interface typesFrom {
     0x11: bufFrom<number[]>;
     0x12: bufFrom<string[]>;
     0x20: bufFrom<RPC>;
-    //0x21: bufFrom<number>
 }
 var TypesFrom: typesFrom = {
     0x00: TypeBuf[e.Boolean].fromBuf,
@@ -1192,7 +1191,6 @@ var TypesFrom: typesFrom = {
     0x11: TypeBuf[e.DoubleArray].fromBuf,
     0x12: TypeBuf[e.StringArray].fromBuf,
     0x20: TypeBuf[e.RPC].fromBuf
-    //0x21: TypeBuf[e.Byte].fromBuf
 };
 /**
  * Decodes String where first bytes are length encoded using LEB128
