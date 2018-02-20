@@ -41,6 +41,8 @@ export class Client {
     private continuation: { buf: Buffer; offset: number };
     private strictInput = false;
     private reconnectDelay = 0
+    private autoReconnect:NodeJS.Timer
+    private tryReconnect=false
 
     constructor(options?: clientOptions) {
         if (options == undefined) return;
@@ -67,6 +69,10 @@ export class Client {
      * @param delay Time in milisecconds before the next reconnect attempt
      */
     setReconnectDelay(delay: number) {
+        if(delay<20){
+            this.tryReconnect=false
+            clearTimeout(this.autoReconnect)
+        }
         this.reconnectDelay = delay
         this.debug(debugType.basic, `Setting Reconnect dellay to ${delay}`)
     }
@@ -82,6 +88,9 @@ export class Client {
         address = "127.0.0.1",
         port = 1735
     ) {
+        this.tryReconnect = false;
+        clearTimeout(this.autoReconnect);
+
         /:\/\/\w/.test(address)
         let parsedAddress = url.parse((/:\/\/\w/.test(address) ? "" : "tcp://") + address)
         address = parsedAddress.hostname
@@ -91,6 +100,7 @@ export class Client {
         this.__connect(address,port)
     }
     private __connect(address:string,port:number){
+        this.reconnect=false
         this.connected = false;
         this.address = address;
         this.port = port;
@@ -117,6 +127,14 @@ export class Client {
             })
             .on("close", hadError => {
                 this.debug(debugType.basic, 'Closing socket')
+                if(this.reconnectDelay > 20 && this.connected) this.tryReconnect = true    
+                if(this.tryReconnect && !this.reconnect){
+                    clearTimeout(this.autoReconnect)
+                    this.autoReconnect = setTimeout(()=>{
+                        this.debug(debugType.basic, `Trying to reconnect to ${address}:${port}`)
+                        this.__connect(address, port);
+                    },this.reconnectDelay)
+                }
                 this.socketConnected = false
                 this.connected = false;
                 this.oldEntries = this.entries;
@@ -124,12 +142,6 @@ export class Client {
                 this.keymap = {};
 
                 let reconn: NodeJS.Timer
-                if (!this.reconnect && this.reconnectDelay >= 20) {
-                    reconn = setTimeout(() => {
-                        this.debug(debugType.basic, `Trying to reconnect to ${address}:${port}`)
-                        this.__connect(address, port);
-                    }, this.reconnectDelay)
-                }
                 if (this.reconnect) {
                     this.__connect(address, port);
                 } else if (!hadError) this.conCallback(false, null, this.is2_0);
