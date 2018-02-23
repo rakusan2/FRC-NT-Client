@@ -40,8 +40,7 @@ export function checkBufLen(buf: Buffer, start: number, length: number) {
         throw new LengthError(buf, start, length);
 }
 
-
-function numTo128(num: number) {
+export  function numTo128Arr(num:number){
     let n = num;
     let r: number[] = [];
     while (n > 0x07f) {
@@ -49,7 +48,11 @@ function numTo128(num: number) {
         n = n >> 7;
     }
     r.push(n);
-    return Buffer.from(r);
+    return r
+}
+
+function numTo128Buf(num: number) {
+    return Buffer.from(numTo128Arr(num));
 }
 /**
  * Decodes a number encoded in LEB128
@@ -124,7 +127,7 @@ export class TypesTranslator {
         this.setStringEnc(is2_0)
     }
     setStringEnc(is2_0:boolean){
-        this.stringLenEncoding = is2_0 ? numTo2Byte : numTo128
+        this.stringLenEncoding = is2_0 ? numTo2Byte : numTo128Buf
     }
     valToBuf:ITypesTo = {
         [NTTypeID.Boolean]: val => {
@@ -156,7 +159,7 @@ export class TypesTranslator {
                 };
         },
         [NTTypeID.Buffer]: val => {
-                let len = numTo128(val.length);
+                let len = numTo128Buf(val.length);
                 return {
                     length: val.length + len.length,
                     write: (buf, off) => {

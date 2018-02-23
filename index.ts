@@ -91,7 +91,6 @@ export class Client {
         this.tryReconnect = false;
         clearTimeout(this.autoReconnect);
 
-        /:\/\/\w/.test(address)
         let parsedAddress = url.parse((/:\/\/\w/.test(address) ? "" : "tcp://") + address)
         address = parsedAddress.hostname
         port = parseInt(parsedAddress.port) || port
