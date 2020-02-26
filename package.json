@@ -31,6 +31,6 @@
     "ieee754": "^1.1.8"
   },
   "devDependencies": {
-    "@types/node": "^8.5.9"
+    "@types/node": "~8.10.59"
   }
 }
