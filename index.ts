@@ -161,10 +161,15 @@ export class Client {
     /** Attempts to stop the client */
     stop() {
         this.client.end()
+        this.socketConnected = false
+        this.reconnectDelay = 0
     }
     /** Immediately closes the client */
     destroy() {
         this.client.destroy()
+        this.socketConnected = false
+        this.reconnectDelay = 0
+        this.connected = false
     }
     /**
      * Adds and returns a Listener to be called on change of an Entry

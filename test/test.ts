@@ -20,6 +20,14 @@ ntClient.start((con, err, is2) => {
         if(entry == null) throw new Error("Non Existant Entry")
         ntClient2.start((con, err) => {
             console.log({ con, err, type: "2nd" });
+            
+            if(!con)return
+            setTimeout(() => {
+                console.log("CLOSING")
+                ntClient.stop()
+                ntClient2.destroy()
+            }, 2000);
+
         },args[0],parseInt(args[1])||undefined);
     }, 1000);
 },args[0],parseInt(args[1])||undefined);
