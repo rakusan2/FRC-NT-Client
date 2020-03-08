@@ -27,6 +27,21 @@ export class Client{
             this.setOptions(options)
         }
         this.client = new net.Socket()
+        this.client.on('connect', () =>{
+            
+        })
+        .on('data', data=>{
+
+        })
+        .on('end', ()=>{
+            
+        })
+        .on('error', err =>{
+            
+        })
+        .on('close', had_error =>{
+
+        })
     }
     private setOptions(options:IClientOptions){
         setObj(this.options, options,'force2_0','boolean')
@@ -63,7 +78,7 @@ export class Client{
      * @param port Port of the Server. Default = 1735
      */
     start(callback?: (connected: boolean, err: Error, is2_0: boolean) => any, address?: string, port?: number){
-        
+        this.client.connect(port, address)
     }
     /** Attempts to stop the client */
     stop(){
