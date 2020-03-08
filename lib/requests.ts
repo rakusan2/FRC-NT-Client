@@ -1,5 +1,5 @@
 import { BufferEncoder } from './types';
-import { MessageType, Entry } from './definitions';
+import { MessageType, Entry, NewEntry } from './definitions';
 
 const toServer = {
     keepAlive: Buffer.from([0x00]),
@@ -14,7 +14,7 @@ export function getRequests(is2_0: boolean, identity: string): Requests {
             KeepAlive: getKeepAlive,
             ClientHello: getClientHello2_0,
             ClientHelloComplete: () => notSupported2_0('Client Hello Complete'),
-            EntryAssignment: getEntryUpdate2_0,
+            EntryAssignment: getEntryAssignment2_0,
             EntryUpdate: getEntryUpdate2_0,
             EntryFlagUpdate: () => notSupported2_0('flags'),
             EntryDelete: () => notSupported2_0('Entry Delete'),
@@ -26,7 +26,7 @@ export function getRequests(is2_0: boolean, identity: string): Requests {
             KeepAlive: getKeepAlive,
             ClientHello: () => getClientHello3_0(identity),
             ClientHelloComplete: getClientHelloComplete,
-            EntryAssignment: getEntryUpdate3_0,
+            EntryAssignment: getEntryAssignment3_0,
             EntryUpdate: getEntryUpdate3_0,
             EntryFlagUpdate: getFlagUpdate,
             EntryDelete: getEntryDelete,
@@ -40,7 +40,7 @@ interface Requests {
     KeepAlive(): Buffer
     ClientHello(): Buffer
     ClientHelloComplete(): Buffer
-    EntryAssignment(entryID: number, entry: Entry): Buffer
+    EntryAssignment(entry: NewEntry): Buffer
     EntryUpdate(entryID: number, entry: Entry): Buffer
     EntryFlagUpdate(entryID: number, flags: number): Buffer
     EntryDelete(entryID: number): Buffer
@@ -71,23 +71,23 @@ function getClientHelloComplete() {
     return toServer.helloComplete
 }
 
-function getEntryAssignment3_0(entry: Entry) {
+function getEntryAssignment3_0(entry: NewEntry) {
     return new BufferEncoder(false)
         .add(MessageType.EntryAssignment)
         .addString(entry.name)
         .add(entry.typeID)
-        .add([0xff, 0xff, 0, 0])
+        .add([0xff, 0xff, 0, 0]) // 0xffff Assign new entry id, 0x0000 First in sequence
         .add(entry.flags)
         .addType(entry.typeID, entry.val)
         .build()
 }
 
-function getEntryAssignment2_0(entry: Entry) {
+function getEntryAssignment2_0(entry: NewEntry) {
     return new BufferEncoder(true)
         .add(MessageType.EntryAssignment)
         .addString(entry.name)
         .add(entry.typeID)
-        .add([0xff, 0xff, 0, 0])
+        .add([0xff, 0xff, 0, 0]) // 0xffff Assign new entry id, 0x0000 First in sequence
         .addType(entry.typeID, entry.val)
         .build()
 }

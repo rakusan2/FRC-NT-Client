@@ -1,9 +1,12 @@
-export interface Entry {
+export interface Entry<T = any> extends NewEntry<T> {
+    sn: number;
+}
+
+export interface NewEntry<T = any> {
     typeID: number;
     name: string;
-    sn: number;
     flags: number;
-    val?: any;
+    val: T;
 }
 export interface RPC {
     name: string;
@@ -21,7 +24,7 @@ export interface RPCResult {
     typeName: string;
     name: string;
 }
-export const enum MessageType{
+export const enum MessageType {
     KeepAlive = 0x00,
     ClientHello = 0x01,
     ProtocolUnsupported = 0x02,
