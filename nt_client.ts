@@ -1,64 +1,116 @@
-import * as net from 'net'
+import { Socket } from 'net'
+import { getRequests } from './lib/requests';
+import { EntryType, fixTypeID, getTypeID } from './lib/types';
+import { NewEntry, Entry } from './lib/definitions';
+import { ResponseDecoder } from './lib/responses';
 
 export type Listener = (key: string, value: any, valueType: String, eventType: "add" | "delete" | "update" | "flagChange", id: number, flags: number) => any;
-
-function setObj<T>(opts:T, toSet:T, key:keyof T, type:'string'|'number'|'boolean'|'object'){
-    if(typeof toSet[key] == type){
+type conCallback = (connected: boolean, err: Error, is2_0: boolean) => void
+function setObj<T>(opts: T, toSet: T, key: keyof T, type: 'string' | 'number' | 'boolean' | 'object') {
+    if (typeof toSet[key] == type) {
         opts[key] = toSet[key]
     } else {
         throw new Error(`${key} option needs to be a ${type}`)
     }
 }
 
-export class Client{
-    private debug = (level: debugType, val: any) => {}
+export class Client {
+    private debug = (level: debugType, val: any) => { }
+    private connectionCallback: conCallback
     private options: Required<IClientOptions> = {
         strictInput: false,
         name: "NodeJS_" + Date.now(),
         force2_0: false,
         returnTypeIDs: false
     }
-    private client: net.Socket
+    private client: Socket
     private connected = false
+    private socketConnected = false
+    private entryIds: { [key: string]: number } = {}
+    private entries: { [key: number]: Entry } = {}
+    private oldEntries: {[key:number]: Entry}
     private is2_0 = false
+    private requesters = getRequests(false, this.options.name)
+    private responders = new ResponseDecoder(false, {
+        ProtocolUnsupported(major, minor) {
 
-    constructor(options?:IClientOptions){
-        if(options != null && typeof options == 'object'){
+        },
+        ServerHello(name, flags) {
+
+        },
+        ServerHelloComplete() {
+
+        },
+        EntryAssignment(entryID, entry) {
+
+        },
+        EntryUpdate(entryID, sn, val, typeID) {
+
+        },
+        EntryFlagUpdate(entryID, flags) {
+
+        },
+        EntryDelete(entryID) {
+
+        },
+        DeleteAll() {
+
+        },
+        RPCResponse(entryID, uniqueID, results) {
+
+        },
+        GetEntry(entryID) {
+            return this.entries[entryID]
+        }
+    })
+
+    constructor(options?: IClientOptions) {
+        if (options != null && typeof options == 'object') {
             this.setOptions(options)
         }
-        this.client = new net.Socket()
-        this.client.on('connect', () =>{
-            
+        this.client = new Socket()
+        this.client.on('connect', () => {
+            this.socketConnected = true
+            this.client.setTimeout(1000)
+            const buf = this.requesters.ClientHello()
+            this.write(buf, true)
         })
-        .on('data', data=>{
+            .on('data', data => {
+                this.responders.decode(data)
+            })
+            .on('end', () => {
 
-        })
-        .on('end', ()=>{
-            
-        })
-        .on('error', err =>{
-            
-        })
-        .on('close', had_error =>{
+            })
+            .on('error', err => {
 
-        })
+            })
+            .on('close', had_error => {
+
+            }).on('timeout', () => {
+                if (this.socketConnected) {
+                    this.client.setTimeout(1000)
+                    this.write(Buffer.from([0]), true)
+                }
+            })
+
     }
-    private setOptions(options:IClientOptions){
-        setObj(this.options, options,'force2_0','boolean')
+    private setOptions(options: IClientOptions) {
+        setObj(this.options, options, 'force2_0', 'boolean')
         setObj(this.options, options, 'name', 'string')
         setObj(this.options, options, 'returnTypeIDs', 'boolean')
         setObj(this.options, options, 'strictInput', 'boolean')
     }
+
     /**
      * True if the Client has completed its hello and is connected
      */
-    isConnected(){
+    isConnected() {
         return this.connected
     }
     /**
      * True if the client has switched to 2.0
      */
-    uses2_0(){
+    uses2_0() {
         return this.is2_0
     }
     /**
@@ -68,8 +120,8 @@ export class Client{
      * Delay of 20 or less will deactivate this feature
      * @param delay Time in milliseconds before the next reconnect attempt
      */
-    setReconnectDelay(delay: number){
-        
+    setReconnectDelay(delay: number) {
+
     }
     /**
      * Start the Client
@@ -77,96 +129,115 @@ export class Client{
      * @param address Address of the Server. Default = "localhost"
      * @param port Port of the Server. Default = 1735
      */
-    start(callback?: (connected: boolean, err: Error, is2_0: boolean) => any, address?: string, port?: number){
+    start(callback?: conCallback, address = 'localhost', port = 1735) {
+        this.connect(address, port)
+    }
+    private connect(address: string, port: number) {
         this.client.connect(port, address)
     }
     /** Attempts to stop the client */
-    stop(){
-        
+    stop() {
+        this.client.end()
     }
     /** Immediately closes the client */
-    destroy(){
-        
+    destroy() {
+        this.client.destroy()
+        this.connected = false
     }
     /**
      * Adds and returns a Listener to be called on change of an Entry
      * @param callback Listener
      */
-    addListener(key:string, callback: Listener, getCurrent?: boolean)
+    addListener(key: string, callback: Listener, getCurrent?: boolean)
     addListener(callback: Listener, getCurrent?: boolean)
-    addListener(arg1:string | Listener, arg2: Listener | Boolean, getCurrent?: boolean){
-        
+    addListener(arg1: string | Listener, arg2: Listener | Boolean, getCurrent?: boolean) {
+
     }
     /**
      * Removes a Listener
      * @param listener the Listener to remove
      */
-    removeListener(listener: Listener){
-        
+    removeListener(listener: Listener) {
+
     }
     /**
      * Get the unique ID of a key or the IDs of all keys if called empty
      * @param key name of the key
      */
-    getKeyID(key?: string){
-        
+    getKeyID(): { [key: string]: number };
+    getKeyID(key: string): number;
+    getKeyID(key?: string) {
+        if(typeof key === 'undefined'){
+            return this.entryIds
+        }else{
+            return this.entryIds[key]
+        }
     }
     /**
      * Gets an Entry
      * @param id ID of an Entry
      */
-    getEntry(id: number){
-        
+    getEntry(id: number) {
+        return this.entries[id]
     }
     /**
      * Get an Array of Keys
      */
-    getKeys(){
-        
+    getKeys() {
+        Object.keys(this.entryIds)
     }
     /**
      * Get All of the Entries
      */
-    getEntries(){
-
+    getEntries() {
+        return this.entries
     }
     /**
      * Add an Entry
      * @param val The Value
      * @param name The Key of the Entry
      * @param persist Whether the Value should persist on the server through a restart
+     * @param valType The data type of the value
      */
-    Assign(val: any, name: string, persist?: boolean | number){
-        
+    Assign(val: any, name: string, persist: boolean | number = 0, valType?: EntryType) {
+        const valueType = typeof valType === 'number' ? valType : getTypeID(val)
+        const entry: NewEntry = {
+            val: fixTypeID(val, valueType, this.options.strictInput),
+            name,
+            typeID: valueType,
+            flags: +persist
+        }
+        const buf = this.requesters.EntryAssignment(entry)
+        // TODO Send
     }
     /**
      * Updates an Entry
      * @param id The ID of the Entry
      * @param val The value of the Entry
      */
-    Update(id: number, val: any){
-        
+    Update(id: number, val: any) {
+
     }
     /**
      * Updates the Flag of an Entry
      * @param id The ID of the Entry
      * @param flags Whether the Entry should persist through a restart on the server
      */
-    Flag(id: number, flags?: boolean | number){
-        
+    Flag(id: number, flags?: boolean | number) {
+
     }
     /**
      * Deletes an Entry
      * @param id The ID of the Entry
      */
-    Delete(id: number){
+    Delete(id: number) {
 
     }
     /**
      * Deletes All Entries
      */
-    DeleteAll(){
-        
+    DeleteAll() {
+
     }
     /**
      * Executes an RPC
@@ -174,31 +245,23 @@ export class Client{
      * @param val The Values of the Parameters
      * @param callback To be called with the Results
      */
-    RPCExec(id: number, val: Object, callback: (result: Object) => any){
-        
+    RPCExec(id: number, val: Object, callback: (result: Object) => any) {
+
     }
     /**
      * Direct Write to the Server
      * @param buf The Buffer to be sent
      * @param immediate whether the write should happen right away
      */
-    write(buf: Buffer, immediate?: boolean){
-        
+    write(buf: Buffer, immediate?: boolean) {
+
     }
-    startDebug(name: string, debugLevel?: debugType){
-        
+    startDebug(name: string, debugLevel?: debugType) {
+
     }
 }
 
-export interface Entry {
-    typeID: number;
-    name: string;
-    sn: number;
-    flags: number;
-    val?: any;
-}
-
-export interface IClientOptions{
+export interface IClientOptions {
     /** Do not try to convert types */
     strictInput?: boolean,
     /** The client name given to the server */
