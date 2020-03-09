@@ -16,7 +16,7 @@ export class ResponseDecoder {
             this.decoders = {
                 0x00: () => { },
                 0x02: () => protocolUnsupported(this.buf, this.callbacks.ProtocolUnsupported),
-                0x03: () => { },
+                0x03: () => this.callbacks.ServerHelloComplete(),
                 0x10: () => entryAssignment2_0(this.buf, this.callbacks.EntryAssignment),
                 0x11: () => entryUpdate2_0(this.buf, this.callbacks.EntryUpdate, this.callbacks.GetEntry)
             }
@@ -24,7 +24,7 @@ export class ResponseDecoder {
             this.decoders = {
                 0x00: () => { },
                 0x02: () => protocolUnsupported(this.buf, this.callbacks.ProtocolUnsupported),
-                0x03: () => { },
+                0x03: () => this.callbacks.ServerHelloComplete(),
                 0x04: () => serverHello(this.buf, this.callbacks.ServerHello),
                 0x10: () => entryAssignment3_0(this.buf, this.callbacks.EntryAssignment),
                 0x11: () => entryUpdate3_0(this.buf, this.callbacks.EntryUpdate),
@@ -62,14 +62,66 @@ export class ResponseDecoder {
 }
 
 interface ResponseCallbacks {
+    /** Called with the highest supported protocol version  */
     ProtocolUnsupported(major: number, minor: number)
+    /**
+     * Server hello in response to Client hello
+     * 
+     * Not supported in 2.0
+     * @param name The name of the server
+     * @param flags The flags og the server (bit 0 is set on reconnect)
+     */
     ServerHello(name: string, flags: number)
+    /** Called when client is caught up with current entries */
+    ServerHelloComplete()
+    /**
+     * New entry was created
+     * @param entryID The id of the new entry
+     * @param entry The new entry
+     */
     EntryAssignment(entryID: number, entry: Entry)
+    /**
+     * Current Entry was updated
+     * @param entryID The id of the entry
+     * @param sn The version number of the entry
+     * @param val The value of the entry
+     * @param typeID The value type of the entry
+     */
     EntryUpdate(entryID: number, sn: number, val: any, typeID: number)
+    /**
+     * Entry flag was updated
+     * 
+     * Not supported in 2.0
+     * @param entryID The entry id
+     * @param flags The new flags
+     */
     EntryFlagUpdate(entryID: number, flags: number)
+    /**
+     * An Entry was deleted
+     * 
+     * Not supported in 2.0
+     * @param entryID The id of the entry
+     */
     EntryDelete(entryID: number)
+    /**
+     * All entries were deleted
+     * 
+     * Not supported in 2.0
+     */
     DeleteAll()
+    /**
+     * Response to an RPC request
+     * 
+     * Not supported in 2.0
+     * @param entryID The RPC entry id
+     * @param uniqueID The id of the specific request
+     * @param results The results of the request
+     */
     RPCResponse(entryID: number, uniqueID: number, results: { [key: string]: any })
+    /**
+     * Internal method requesting an entry
+     * @param EntryID the id of the the requested entry
+     */
     GetEntry(EntryID): Entry
 }
 
