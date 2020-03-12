@@ -18,3 +18,9 @@ export class LengthError extends Error {
         } else super(mesg);
     }
 }
+
+export class NotSupported extends Error {
+    constructor(version: string, name: string) {
+        super(`${version} does not support ${name}`)
+    }
+}

@@ -1,5 +1,6 @@
 import { BufferEncoder } from './types';
 import { MessageType, Entry, NewEntry } from './definitions';
+import { NotSupported } from './error';
 
 const toServer = {
     keepAlive: Buffer.from([0x00]),
@@ -8,48 +9,52 @@ const toServer = {
     hello2_0: Buffer.from([0x01, 2, 0])
 };
 
-export function getRequests(is2_0: boolean, identity: string): Requests {
+export function getRequests(is2_0: boolean, identity: string, write: (buf: Buffer, immediate: boolean) => void): Requests {
     if (is2_0) {
         return {
-            KeepAlive: getKeepAlive,
-            ClientHello: getClientHello2_0,
-            ClientHelloComplete: () => notSupported2_0('Client Hello Complete'),
-            EntryAssignment: getEntryAssignment2_0,
-            EntryUpdate: getEntryUpdate2_0,
-            EntryFlagUpdate: () => notSupported2_0('flags'),
-            EntryDelete: () => notSupported2_0('Entry Delete'),
-            DeleteAll: () => notSupported2_0('Delete All'),
-            RPCExecute: () => notSupported2_0('RPC')
+            KeepAlive: () => write(getKeepAlive(), true),
+            ClientHello: () => write(getClientHello2_0(), true),
+            ClientHelloComplete: notSupported2_0('Client Hello Complete'),
+            EntryAssignment: (entry) => write(getEntryAssignment2_0(entry), false),
+            EntryUpdate: (entryID, entry) => write(getEntryUpdate2_0(entryID, entry), false),
+            EntryFlagUpdate: notSupported2_0('flags'),
+            EntryDelete: notSupported2_0('Entry Delete'),
+            DeleteAll: notSupported2_0('Delete All'),
+            RPCExecute: notSupported2_0('RPC')
         }
     } else {
         return {
-            KeepAlive: getKeepAlive,
-            ClientHello: () => getClientHello3_0(identity),
-            ClientHelloComplete: getClientHelloComplete,
-            EntryAssignment: getEntryAssignment3_0,
-            EntryUpdate: getEntryUpdate3_0,
-            EntryFlagUpdate: getFlagUpdate,
-            EntryDelete: getEntryDelete,
-            DeleteAll: getDeleteAll,
-            RPCExecute: getRPCExecute
+            KeepAlive: () => write(getKeepAlive(), true),
+            ClientHello: () => write(getClientHello3_0(identity), true),
+            ClientHelloComplete: () => write(getClientHelloComplete(), true),
+            EntryAssignment: (entry) => write(getEntryAssignment3_0(entry), false),
+            EntryUpdate: (entryID, entry) => write(getEntryUpdate3_0(entryID, entry), false),
+            EntryFlagUpdate: (entryID, flags) => write(getFlagUpdate(entryID, flags), false),
+            EntryDelete: (entryID) => write(getEntryDelete(entryID), false),
+            DeleteAll: () => write(getDeleteAll(), false),
+            RPCExecute: (entryID, returnID, params) => write(getRPCExecute(entryID, returnID, params), false)
         }
     }
 }
 
 interface Requests {
-    KeepAlive(): Buffer
-    ClientHello(): Buffer
-    ClientHelloComplete(): Buffer
-    EntryAssignment(entry: NewEntry): Buffer
-    EntryUpdate(entryID: number, entry: Entry): Buffer
-    EntryFlagUpdate(entryID: number, flags: number): Buffer
-    EntryDelete(entryID: number): Buffer
-    DeleteAll(): Buffer
-    RPCExecute(entryID: number, returnID: number, params: { typeID: number, val: any }[]): Buffer
+    KeepAlive(): void
+    ClientHello(): void
+    ClientHelloComplete(): void
+    EntryAssignment(entry: NewEntry): void
+    EntryUpdate(entryID: number, entry: Entry): void
+    EntryFlagUpdate(entryID: number, flags: number): void
+    EntryDelete(entryID: number): void
+    DeleteAll(): void
+    RPCExecute(entryID: number, returnID: number, params: { typeID: number, val: any }[]): void
 }
 
-function notSupported2_0(name: string): Buffer {
-    throw new Error(`2.0 does not support ${name}`)
+function notSupported2_0(name: string) {
+    function throwNotSupported(){
+        throw new NotSupported('2.0', name)
+    }
+    throwNotSupported.throwsError = true
+    return throwNotSupported
 }
 
 function getKeepAlive() {

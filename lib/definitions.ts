@@ -39,3 +39,10 @@ export const enum MessageType {
     RPCExecute = 0x20,
     RPCResponse = 0x21
 }
+
+declare global{
+    interface Function{
+        /** This function always throws an error */
+        throwsError?:boolean
+    }
+}

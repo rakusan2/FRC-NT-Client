@@ -1,7 +1,7 @@
 import { Socket } from 'net'
 import { getRequests } from './lib/requests';
 import { EntryType, fixTypeID, getTypeID } from './lib/types';
-import { NewEntry, Entry } from './lib/definitions';
+import { NewEntry, Entry, RPC, RPCPar } from './lib/definitions';
 import { ResponseDecoder } from './lib/responses';
 
 export type Listener = (key: string, value: any, valueType: String, eventType: "add" | "delete" | "update" | "flagChange", id: number, flags: number) => any;
@@ -17,49 +17,72 @@ function setObj<T>(opts: T, toSet: T, key: keyof T, type: 'string' | 'number' | 
 export class Client {
     private debug = (level: debugType, val: any) => { }
     private connectionCallback: conCallback
+    private RPCCallbacks: ((responses: { [key: string]: any }) => any)[] = []
     private options: Required<IClientOptions> = {
         strictInput: false,
         name: "NodeJS_" + Date.now(),
         force2_0: false,
-        returnTypeIDs: false
+        returnTypeIDs: false,
+        strictFunction: false
     }
+    private serverOptions:{name:string, flags: number}
     private client: Socket
     private connected = false
     private socketConnected = false
     private entryIds: { [key: string]: number } = {}
     private entries: { [key: number]: Entry } = {}
-    private oldEntries: {[key:number]: Entry}
+    private oldEntries: { [key: number]: Entry }
     private is2_0 = false
-    private requesters = getRequests(false, this.options.name)
-    private responders = new ResponseDecoder(false, {
-        ProtocolUnsupported(major, minor) {
-
+    private sendRequest = getRequests(false, this.options.name, (buf, immediate) => this.write(buf, immediate))
+    private response = new ResponseDecoder(false, {
+        ProtocolUnsupported: (major, minor) => {
+            if (major === 2 && minor == 0) {
+                // TODO Restart client
+            } else {
+                this.connectionCallback(false, new Error(`This Server supports minimum version ${major}.${minor}`), this.options.force2_0)
+            }
         },
-        ServerHello(name, flags) {
-
+        ServerHello: (name, flags) => {
+            this.serverOptions = {name, flags}
         },
-        ServerHelloComplete() {
-
+        ServerHelloComplete: () => {
+            this.connected = true
+            // TODO Do Assign
+            if(!this.sendRequest.ClientHelloComplete.throwsError){
+                this.sendRequest.ClientHelloComplete()
+            }
+            this.connectionCallback(true, null, this.options.force2_0)
         },
-        EntryAssignment(entryID, entry) {
-
+        EntryAssignment: (entryID, entry) => {
+            this.entries[entryID] = entry
+            // TODO Call listeners
         },
-        EntryUpdate(entryID, sn, val, typeID) {
-
+        EntryUpdate: (entryID, sn, val, typeID) => {
+            const entry = this.entries[entryID]
+            if(entry.typeID === typeID){
+                entry.sn = sn
+                entry.val = val
+            }
+            // TODO Call listeners
         },
-        EntryFlagUpdate(entryID, flags) {
-
+        EntryFlagUpdate: (entryID, flags) => {
+            this.entries[entryID].flags = flags
+            // TODO Call listeners
         },
-        EntryDelete(entryID) {
-
+        EntryDelete: (entryID) => {
+            delete this.entries[entryID]
+            // TODO Call listeners
         },
-        DeleteAll() {
-
+        DeleteAll: () => {
+            this.entries = {}
+            // TODO Call listeners
         },
-        RPCResponse(entryID, uniqueID, results) {
-
+        RPCResponse: (_entryID, uniqueID, results) => {
+            if(typeof this.RPCCallbacks[uniqueID] === 'function'){
+                this.RPCCallbacks[uniqueID](results)
+            }
         },
-        GetEntry(entryID) {
+        GetEntry: (entryID) => {
             return this.entries[entryID]
         }
     })
@@ -72,11 +95,10 @@ export class Client {
         this.client.on('connect', () => {
             this.socketConnected = true
             this.client.setTimeout(1000)
-            const buf = this.requesters.ClientHello()
-            this.write(buf, true)
+            this.sendRequest.ClientHello()
         })
             .on('data', data => {
-                this.responders.decode(data)
+                this.response.decode(data)
             })
             .on('end', () => {
 
@@ -99,6 +121,7 @@ export class Client {
         setObj(this.options, options, 'name', 'string')
         setObj(this.options, options, 'returnTypeIDs', 'boolean')
         setObj(this.options, options, 'strictInput', 'boolean')
+        setObj(this.options, options, 'strictFunction', 'boolean')
     }
 
     /**
@@ -167,11 +190,15 @@ export class Client {
     getKeyID(): { [key: string]: number };
     getKeyID(key: string): number;
     getKeyID(key?: string) {
-        if(typeof key === 'undefined'){
+        if (typeof key === 'undefined') {
             return this.entryIds
-        }else{
+        } else {
             return this.entryIds[key]
         }
+    }
+
+    hasID(id: number) {
+        return (typeof this.entries[id] !== 'undefined')
     }
     /**
      * Gets an Entry
@@ -200,6 +227,14 @@ export class Client {
      * @param valType The data type of the value
      */
     Assign(val: any, name: string, persist: boolean | number = 0, valType?: EntryType) {
+        if (typeof this.entryIds[name] != 'undefined') {
+            if (this.options.strictFunction) {
+                throw new Error(`key "${name}" already exists`)
+            } else {
+                return this.Update(this.entries[name], val)
+            }
+        }
+
         const valueType = typeof valType === 'number' ? valType : getTypeID(val)
         const entry: NewEntry = {
             val: fixTypeID(val, valueType, this.options.strictInput),
@@ -207,8 +242,7 @@ export class Client {
             typeID: valueType,
             flags: +persist
         }
-        const buf = this.requesters.EntryAssignment(entry)
-        // TODO Send
+        this.sendRequest.EntryAssignment(entry)
     }
     /**
      * Updates an Entry
@@ -216,7 +250,12 @@ export class Client {
      * @param val The value of the Entry
      */
     Update(id: number, val: any) {
+        this.checkID(id)
 
+        const entry = this.entries[id]
+        const value = fixTypeID(val, entry.typeID, this.options.strictInput)
+        entry.val = value
+        this.sendRequest.EntryUpdate(id, entry)
     }
     /**
      * Updates the Flag of an Entry
@@ -224,20 +263,27 @@ export class Client {
      * @param flags Whether the Entry should persist through a restart on the server
      */
     Flag(id: number, flags?: boolean | number) {
+        this.checkID(id)
 
+        const flagsToSend = +flags
+        if (flagsToSend < 0 || flagsToSend > 0xff) {
+            throw new Error(`The flags have to be a byte (0-255)`)
+        }
+        this.sendRequest.EntryFlagUpdate(id, +flags)
     }
     /**
      * Deletes an Entry
      * @param id The ID of the Entry
      */
     Delete(id: number) {
-
+        this.checkID(id)
+        this.sendRequest.EntryDelete(id)
     }
     /**
      * Deletes All Entries
      */
     DeleteAll() {
-
+        this.sendRequest.DeleteAll()
     }
     /**
      * Executes an RPC
@@ -245,8 +291,34 @@ export class Client {
      * @param val The Values of the Parameters
      * @param callback To be called with the Results
      */
-    RPCExec(id: number, val: Object, callback: (result: Object) => any) {
+    RPCExec(id: number, val: Object): Promise<{ [key: string]: any }>
+    RPCExec(id: number, val: Object, callback: (result: Object) => any): void
+    RPCExec(id: number, val: Object, callback?: (result: Object) => any) {
+        const entry: RPC = this.getRPC(id)
+        const parameters = entry.par
+        let par: RPCPar
+        let preparedPars = new Array<{ typeID: number, val: any }>(parameters.length)
 
+        for (let i = 0; i < parameters.length; i++) {
+            par = parameters[i]
+            if (typeof val[par.name] == 'undefined') {
+                preparedPars[i] = { typeID: par.typeId, val: par.default }
+            } else {
+                preparedPars[i] = { typeID: par.typeId, val: fixTypeID(val, par.typeId, this.options.strictInput) }
+            }
+        }
+        const responseID = Math.floor(Math.random() * 0xffff)
+        this.sendRequest.RPCExecute(id, responseID, preparedPars)
+
+        if (typeof callback == 'function') {
+            this.RPCCallbacks[responseID] = callback
+        } else {
+            return new Promise(res => {
+                this.RPCCallbacks[responseID] = resVal => {
+                    res(resVal)
+                }
+            })
+        }
     }
     /**
      * Direct Write to the Server
@@ -259,6 +331,21 @@ export class Client {
     startDebug(name: string, debugLevel?: debugType) {
 
     }
+
+    private checkID(id: number) {
+        if (!this.hasID(id)) {
+            throw new Error(`The ID ${id} does not exist`)
+        }
+    }
+    private getRPC(id: number) {
+        this.checkID(id)
+        const entryVal: RPC = this.entries[id].val
+        if (entryVal != null && typeof entryVal === 'object' && Array.isArray(entryVal.par)) {
+            return entryVal
+        } else {
+            throw new Error(`The Entry with ID ${id} is not an RPC`)
+        }
+    }
 }
 
 export interface IClientOptions {
@@ -267,9 +354,11 @@ export interface IClientOptions {
     /** The client name given to the server */
     name?: string,
     /** Callbacks return value type id numbers instead of type strings */
-    returnTypeIDs?: boolean
+    returnTypeIDs?: boolean,
     /** Use Network Tables Version 2.0 */
-    force2_0?: boolean
+    force2_0?: boolean,
+    /** Assign won't update */
+    strictFunction: boolean
 }
 
 export const enum debugType {

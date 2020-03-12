@@ -20,6 +20,7 @@ export class BufSequencer {
 
     clear() {
         this.buf = Buffer.alloc(0)
+        this.savedIndex = this.index = 0
     }
 
     saveIndex() {

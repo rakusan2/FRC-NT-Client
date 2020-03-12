@@ -37,10 +37,11 @@ export class ResponseDecoder {
     }
     decode(buf: Buffer) {
         try {
+            let messageType: number
             this.buf.add(buf)
-            this.buf.saveIndex()
-            const messageType = this.buf.nextByte()
-            while (!this.buf.isEnd) {
+            while (!this.buf.isEnd()) {
+                this.buf.saveIndex()
+                messageType = this.buf.nextByte()
                 if (typeof this.decoders[messageType] === 'function') {
                     this.decoders[messageType]()
                 } else {
