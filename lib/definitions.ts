@@ -1,12 +1,9 @@
-export interface Entry<T = any> extends NewEntry<T> {
-    sn: number;
-}
-
-export interface NewEntry<T = any> {
+export interface Entry<T = any> {
     typeID: number;
     name: string;
     flags: number;
     val: T;
+    sn:number;
 }
 export interface RPC {
     name: string;

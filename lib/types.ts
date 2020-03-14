@@ -35,6 +35,10 @@ export const enum EntryType {
     RPC = 0x20
 }
 
+export function isValidType(val:any){
+    return (val != null) && (typeof val === 'number') && (typeof typeNames[val] !== 'undefined')
+}
+
 export class BufferDecoder extends BufSequencer {
     private entryValDecoders = {
         0x00: this.nextBoolean,

@@ -1,5 +1,5 @@
 import { BufferEncoder } from './types';
-import { MessageType, Entry, NewEntry } from './definitions';
+import { MessageType, Entry } from './definitions';
 import { NotSupported } from './error';
 
 const toServer = {
@@ -41,7 +41,7 @@ interface Requests {
     KeepAlive(): void
     ClientHello(): void
     ClientHelloComplete(): void
-    EntryAssignment(entry: NewEntry): void
+    EntryAssignment(entry: Entry): void
     EntryUpdate(entryID: number, entry: Entry): void
     EntryFlagUpdate(entryID: number, flags: number): void
     EntryDelete(entryID: number): void
@@ -76,7 +76,7 @@ function getClientHelloComplete() {
     return toServer.helloComplete
 }
 
-function getEntryAssignment3_0(entry: NewEntry) {
+function getEntryAssignment3_0(entry: Entry) {
     return new BufferEncoder(false)
         .add(MessageType.EntryAssignment)
         .addString(entry.name)
@@ -87,7 +87,7 @@ function getEntryAssignment3_0(entry: NewEntry) {
         .build()
 }
 
-function getEntryAssignment2_0(entry: NewEntry) {
+function getEntryAssignment2_0(entry: Entry) {
     return new BufferEncoder(true)
         .add(MessageType.EntryAssignment)
         .addString(entry.name)
