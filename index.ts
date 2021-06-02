@@ -74,7 +74,7 @@ export class Client {
             clearTimeout(this.autoReconnect)
         }
         this.reconnectDelay = delay
-        this.debug(debugType.basic, `Setting Reconnect dellay to ${delay}`)
+        this.debug(debugType.basic, `Setting Reconnect delay to ${delay}`)
     }
 
     /**
